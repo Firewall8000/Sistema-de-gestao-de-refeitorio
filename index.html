@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Sistema de Gestão de Almoço por QR Code para Escola Integral Santos Dumont">
+  <meta name="theme-color" content="#0f172a">
+  <title>Santos Dumont — Gestão de Almoço QR Code</title>
+  
+  <!-- Manifest & Favicon -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍱</text></svg>">
+  
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/scanner.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+</head>
+<body>
+
+  <!-- Offline Status Warning Bar -->
+  <div id="offline-bar" class="offline-bar hidden">
+    <span>⚠️ Você está operando OFFLINE. Os registros de almoço serão salvos localmente e sincronizados quando a internet retornar.</span>
+  </div>
+
+  <!-- Main Header -->
+  <header class="app-header">
+    <div class="brand">
+      <div class="brand-icon">🍱</div>
+      <div class="brand-text">
+        <h1>Escola Santos Dumont</h1>
+        <p>Gestão de Refeitório & Almoço</p>
+      </div>
+    </div>
+    
+    <div class="header-actions">
+      <div class="user-badge">
+        <span class="user-role-dot"></span>
+        <span id="user-role-label">Operador (Cozinha)</span>
+      </div>
+      <button id="btn-toggle-role" class="btn btn-secondary btn-sm" title="Alternar entre visão do operador e diretoria">
+        🔄 Alternar Perfil
+      </button>
+    </div>
+  </header>
+
+  <!-- App Main Content Container -->
+  <main class="app-body">
+    
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs" aria-label="Navegação do Sistema">
+      <button class="tab-btn active" data-tab="tab-scanner">
+        📷 Leitura / Refeitório
+      </button>
+      <button class="tab-btn" data-tab="tab-students" id="tab-btn-students">
+        👥 Gestão de Alunos
+      </button>
+      <button class="tab-btn" data-tab="tab-dashboard" id="tab-btn-dashboard">
+        📊 Dashboard & Relatórios
+      </button>
+    </nav>
+
+    <!-- TAB 1: SCANNER & VALIDAÇÃO REFEITÓRIO -->
+    <section id="tab-scanner" class="tab-content active">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">📷 Validação de Almoço em Tempo Real</h2>
+          <span class="badge badge-info" id="scanner-mode-badge">Leitor Ativo</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
+          
+          <!-- Scanner Camera Area -->
+          <div>
+            <div id="camera-container" style="position: relative; width: 100%; min-height: 250px; background: rgba(15, 23, 42, 0.9); border-radius: var(--radius-md); border: 2px dashed var(--border-color); display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden;">
+              <video id="qr-video" style="width: 100%; height: 100%; object-fit: cover; display: none;" playsinline></video>
+              
+              <div id="camera-placeholder" style="text-align: center; padding: 1.5rem;">
+                <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📷</div>
+                <p style="color: var(--text-muted); font-size: 0.9rem;">Clique no botão abaixo para ativar a câmera do dispositivo</p>
+              </div>
+
+              <div id="scan-line" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 3px; background: var(--color-primary); box-shadow: 0 0 10px var(--color-primary); animation: scanAnim 2s infinite linear;"></div>
+            </div>
+
+            <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+              <button id="btn-start-camera" class="btn btn-primary" style="flex: 1;">▶️ Iniciar Câmera</button>
+              <button id="btn-stop-camera" class="btn btn-secondary" style="display: none;">⏹️ Parar Câmera</button>
+            </div>
+          </div>
+
+          <!-- Manual Fallback Entry & Quick Summary -->
+          <div>
+            <div class="card" style="background: rgba(15, 23, 42, 0.5); margin-bottom: 1rem;">
+              <h3 style="font-size: 0.95rem; margin-bottom: 0.75rem; color: var(--text-muted);">⌨️ Busca Rápida / Emergência (Matrícula)</h3>
+              <form id="form-manual-entry" style="display: flex; gap: 0.5rem;">
+                <input type="text" id="input-manual-registration" class="form-control" placeholder="Digite a Matrícula..." required style="font-size: 1.1rem; font-weight: bold; letter-spacing: 0.05em;">
+                <button type="submit" class="btn btn-success" style="white-space: nowrap;">Confirmar</button>
+              </form>
+            </div>
+
+            <div class="card" style="background: rgba(15, 23, 42, 0.5);">
+              <h3 style="font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text-muted);">📊 Almoços Registrados Hoje</h3>
+              <div style="font-size: 2.2rem; font-weight: 800; color: var(--color-success);" id="counter-today-meals">0</div>
+              <p style="font-size: 0.8rem; color: var(--text-dim);">Registros efetuados na data corrente</p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Result Banner Overlay -->
+        <div id="validation-banner" class="validation-banner success" style="display: none;">
+          <div class="validation-icon" id="val-icon">✓</div>
+          <div class="validation-title" id="val-title">ALMOÇO LIBERADO</div>
+          <div class="validation-detail" id="val-detail">João da Silva Santos — 1º Ano Turma A</div>
+          <div class="validation-sub" id="val-sub">Matrícula: 202600123 • Registrado às 12:15:30</div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB 2: GESTÃO DE ALUNOS -->
+    <section id="tab-students" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">👥 Gestão e Cadastro de Alunos</h2>
+          <button id="btn-open-add-student" class="btn btn-primary">+ Cadastrar Novo Aluno</button>
+        </div>
+
+        <!-- Search & Filter Controls -->
+        <div class="form-row" style="margin-bottom: 1rem;">
+          <div class="form-group" style="flex: 2;">
+            <label class="form-label" for="search-student">Buscar Aluno</label>
+            <input type="text" id="search-student" class="form-control" placeholder="Buscar por Nome ou Matrícula...">
+          </div>
+          <div class="form-group" style="flex: 1;">
+            <label class="form-label" for="filter-grade">Filtrar Série</label>
+            <select id="filter-grade" class="form-control">
+              <option value="">Todas as Séries</option>
+              <option value="1º Ano">1º Ano</option>
+              <option value="2º Ano">2º Ano</option>
+              <option value="3º Ano">3º Ano</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Students Table -->
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Matrícula</th>
+                <th>Nome Completo</th>
+                <th>Série / Turma</th>
+                <th>Status</th>
+                <th>Ações</th>
+              </tr>
+            </thead>
+            <tbody id="students-table-body">
+              <tr>
+                <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                  Carregando lista de alunos...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: DASHBOARD & RELATÓRIOS -->
+    <section id="tab-dashboard" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <h2 class="card-title">📊 Dashboard da Diretoria & Auditoria de Alimentação</h2>
+          <button id="btn-export-csv" class="btn btn-secondary btn-sm">📥 Exportar CSV</button>
+        </div>
+
+        <!-- KPI Metric Cards -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+          <div class="card" style="border-left: 4px solid var(--color-primary);">
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Total de Alunos Ativos</div>
+            <div style="font-size: 1.8rem; font-weight: 800; margin-top: 0.25rem;" id="dash-total-students">0</div>
+          </div>
+          <div class="card" style="border-left: 4px solid var(--color-success);">
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Almoçaram Hoje</div>
+            <div style="font-size: 1.8rem; font-weight: 800; color: var(--color-success); margin-top: 0.25rem;" id="dash-served-today">0</div>
+          </div>
+          <div class="card" style="border-left: 4px solid var(--color-warning);">
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Pendentes no Dia</div>
+            <div style="font-size: 1.8rem; font-weight: 800; color: var(--color-warning); margin-top: 0.25rem;" id="dash-pending-today">0</div>
+          </div>
+          <div class="card" style="border-left: 4px solid var(--color-info);">
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Taxa de Adesão</div>
+            <div style="font-size: 1.8rem; font-weight: 800; color: var(--color-info); margin-top: 0.25rem;" id="dash-rate">0%</div>
+          </div>
+        </div>
+
+        <!-- Historical Report Filters & Table -->
+        <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">📋 Relatório Detalhado por Data</h3>
+        <div class="form-row" style="margin-bottom: 1rem;">
+          <div class="form-group">
+            <label class="form-label" for="report-date">Selecione a Data</label>
+            <input type="date" id="report-date" class="form-control">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="report-filter-status">Status de Alimentação</label>
+            <select id="report-filter-status" class="form-control">
+              <option value="ALL">Todos os Alunos</option>
+              <option value="SERVED">Apenas os que Almoçaram</option>
+              <option value="PENDING">Apenas Ausentes/Pendentes</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Matrícula</th>
+                <th>Nome do Aluno</th>
+                <th>Série/Turma</th>
+                <th>Horário do Almoço</th>
+                <th>Status do Almoço</th>
+              </tr>
+            </thead>
+            <tbody id="report-table-body">
+              <tr>
+                <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                  Selecione uma data para carregar os dados...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL: Cadastro / Edição de Aluno & Impressão QR -->
+  <div id="modal-student" class="modal-backdrop">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 id="modal-student-title" class="card-title">Cadastrar Novo Aluno</h3>
+        <button class="modal-close-btn" id="btn-close-student-modal">&times;</button>
+      </div>
+
+      <form id="form-student">
+        <input type="hidden" id="student-id">
+        
+        <div class="form-group">
+          <label class="form-label" for="student-name">Nome Completo</label>
+          <input type="text" id="student-name" class="form-control" placeholder="Ex: Maria Oliveira" required>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="student-registration">Matrícula (Única)</label>
+            <input type="text" id="student-registration" class="form-control" placeholder="Ex: 20260045" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="student-grade">Série</label>
+            <select id="student-grade" class="form-control" required>
+              <option value="1º Ano">1º Ano</option>
+              <option value="2º Ano">2º Ano</option>
+              <option value="3º Ano">3º Ano</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="student-turma">Turma</label>
+          <input type="text" id="student-turma" class="form-control" placeholder="Ex: Turma A" required>
+        </div>
+
+        <!-- QR Code Container inside Modal -->
+        <div id="qr-preview-area" style="display: none; text-align: center; margin: 1rem 0; padding: 1rem; background: rgba(15, 23, 42, 0.6); border-radius: var(--radius-md);">
+          <div style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem;">Ficha & QR Code do Aluno</div>
+          <div id="qr-code-box" style="display: inline-block; padding: 10px; background: #ffffff; border-radius: 8px;"></div>
+          <div style="margin-top: 0.5rem; display: flex; justify-content: center; gap: 0.5rem;">
+            <button type="button" id="btn-print-badge" class="btn btn-secondary btn-sm">🖨️ Imprimir Ficha</button>
+            <button type="button" id="btn-reissue-qr" class="btn btn-danger btn-sm" title="Revoga o QR code antigo e gera um novo">🔄 Revogar & Gerar Novo QR</button>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.5rem;">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-student">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Salvar Aluno</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <style>
+    @keyframes scanAnim {
+      0% { top: 0%; }
+      50% { top: 95%; }
+      100% { top: 0%; }
+    }
+  </style>
+
+  <!-- JavaScript Scripts loaded in strict order -->
+  <script src="js/db.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/studentService.js"></script>
+  <script src="js/qrGenerator.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/scanner.js"></script>
+  <script src="js/mealService.js"></script>
+  <script src="js/sync.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
