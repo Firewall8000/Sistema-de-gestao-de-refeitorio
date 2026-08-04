@@ -199,6 +199,56 @@ class RefectoryDatabase {
       }
     }
   }
+
+  /**
+   * Exports all database stores as a JSON backup file.
+   */
+  async exportDatabaseJson() {
+    const students = await this.getAll('students');
+    const mealLogs = await this.getAll('meal_logs');
+    const users = await this.getAll('users');
+
+    const backupData = {
+      app: 'SantosDumontRefectoryDB',
+      exportedAt: new Date().toISOString(),
+      stores: {
+        students,
+        meal_logs: mealLogs,
+        users
+      }
+    };
+
+    const jsonStr = JSON.stringify(backupData, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    const dateStr = new Date().toISOString().split('T')[0];
+    link.download = `Backup_SantosDumont_DB_${dateStr}.json`;
+    link.click();
+  }
+
+  /**
+   * Imports database stores from a JSON backup object.
+   */
+  async importDatabaseJson(jsonData) {
+    if (!jsonData || !jsonData.stores) {
+      throw new Error('Arquivo de backup (.JSON) inválido.');
+    }
+
+    if (jsonData.stores.students && Array.isArray(jsonData.stores.students)) {
+      for (const student of jsonData.stores.students) {
+        await this.put('students', student);
+      }
+    }
+
+    if (jsonData.stores.meal_logs && Array.isArray(jsonData.stores.meal_logs)) {
+      for (const meal of jsonData.stores.meal_logs) {
+        await this.put('meal_logs', meal);
+      }
+    }
+
+    return true;
+  }
 }
 
 // Global Singleton Instance

@@ -126,7 +126,13 @@
       <div class="card">
         <div class="card-header">
           <h2 class="card-title">👥 Gestão e Cadastro de Alunos</h2>
-          <button id="btn-open-add-student" class="btn btn-primary">+ Cadastrar Novo Aluno</button>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button id="btn-export-db" class="btn btn-secondary btn-sm" title="Baixar arquivo de backup com todos os alunos e refeições em JSON">💾 Backup Banco (.json)</button>
+            <label class="btn btn-secondary btn-sm" style="margin: 0; cursor: pointer;" title="Restaurar banco a partir de um arquivo .json de backup">
+              📂 Restaurar Backup <input type="file" id="input-import-db" accept=".json" style="display: none;">
+            </label>
+            <button id="btn-open-add-student" class="btn btn-primary btn-sm">+ Cadastrar Novo Aluno</button>
+          </div>
         </div>
 
         <!-- Search & Filter Controls -->

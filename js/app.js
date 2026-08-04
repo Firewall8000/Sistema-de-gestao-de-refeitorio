@@ -153,6 +153,37 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Database Backup Export & Restore Events
+  const btnExportDb = document.getElementById('btn-export-db');
+  const inputImportDb = document.getElementById('input-import-db');
+
+  if (btnExportDb) {
+    btnExportDb.addEventListener('click', async () => {
+      await window.dbEngine.exportDatabaseJson();
+    });
+  }
+
+  if (inputImportDb) {
+    inputImportDb.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const jsonData = JSON.parse(event.target.result);
+          await window.dbEngine.importDatabaseJson(jsonData);
+          alert('Backup do banco de dados restaurado com sucesso!');
+          renderStudentsTable();
+          refreshDashboardView();
+        } catch (err) {
+          alert('Erro ao importar backup: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
+
   // Report Date & Status Filters
   const reportDateInput = document.getElementById('report-date');
   const reportStatusFilter = document.getElementById('report-filter-status');
