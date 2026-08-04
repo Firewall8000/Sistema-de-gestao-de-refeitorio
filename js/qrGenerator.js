@@ -78,10 +78,13 @@ class QrBadgeGenerator {
         margin: 0 auto;
         box-shadow: 0 4px 10px rgba(0,0,0,0.15);
       ">
-        <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: #475569; font-weight: bold; margin-bottom: 0.25rem;">
-          ESCOLA SANTOS DUMONT
+        <div style="margin-bottom: 0.3rem;">
+          <img src="assets/img/logo.png" alt="Centro de Excelência Santos Dumont" style="height: 54px; width: auto; object-fit: contain;">
         </div>
-        <div style="font-size: 1.1rem; font-weight: 800; color: #0f172a; margin-bottom: 0.75rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.5rem;">
+        <div style="font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.1em; color: #475569; font-weight: bold; margin-bottom: 0.25rem;">
+          CENTRO DE EXCELÊNCIA SANTOS DUMONT
+        </div>
+        <div style="font-size: 1.05rem; font-weight: 800; color: #0f172a; margin-bottom: 0.75rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.4rem;">
           CRACHÁ DE ALMOÇO
         </div>
 

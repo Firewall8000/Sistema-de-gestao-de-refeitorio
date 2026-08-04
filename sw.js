@@ -12,6 +12,7 @@ const ASSETS_TO_CACHE = [
   './css/components.css',
   './css/scanner.css',
   './css/dashboard.css',
+  './assets/img/logo.png',
   './js/app.js',
   './js/db.js',
   './js/auth.js',
