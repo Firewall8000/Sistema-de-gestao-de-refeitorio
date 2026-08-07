@@ -64,14 +64,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Scanner Buttons: Start / Stop Camera
+  // Scanner Buttons: Start / Stop Camera & Image Upload
   const btnStartCamera = document.getElementById('btn-start-camera');
   const btnStopCamera = document.getElementById('btn-stop-camera');
+  const inputQrFile = document.getElementById('input-qr-file');
+
   if (btnStartCamera) {
     btnStartCamera.addEventListener('click', () => window.qrScannerController.startCamera());
   }
   if (btnStopCamera) {
     btnStopCamera.addEventListener('click', () => window.qrScannerController.stopCamera());
+  }
+  if (inputQrFile) {
+    inputQrFile.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        await window.qrScannerController.scanImageFile(file);
+        inputQrFile.value = '';
+      }
+    });
   }
 
   // Manual Entry Form (Matrícula)
