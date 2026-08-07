@@ -1,6 +1,6 @@
 /* ==========================================================================
    SANTOS DUMONT - REFECTORY QR SYSTEM
-   Main Application Entry & Event Controller
+   Main Application Entry & Event Controller (Custom System Dialogs)
    ========================================================================== */
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -52,9 +52,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Toggle Role Button
   const btnToggleRole = document.getElementById('btn-toggle-role');
   if (btnToggleRole) {
-    btnToggleRole.addEventListener('click', () => {
+    btnToggleRole.addEventListener('click', async () => {
       const newRole = window.authManager.toggleRole();
-      alert(`Perfil alterado para: ${newRole === 'ADMIN' ? 'Diretoria / Admin' : 'Operador (Cozinha)'}`);
+      const roleText = newRole === 'ADMIN' ? 'Diretoria / Admin' : 'Operador (Cozinha)';
+      await showAlertModal({
+        title: 'Perfil Alterado',
+        message: `O perfil de acesso do sistema foi alterado para: ${roleText}.`,
+        type: 'info',
+        icon: '🔄'
+      });
     });
   }
 
@@ -110,13 +116,24 @@ document.addEventListener('DOMContentLoaded', async () => {
       const grade = document.getElementById('student-grade').value;
       const turma = document.getElementById('student-turma').value;
 
+      showLoadingModal('Salvando cadastro no banco de dados e sincronizando com a nuvem...', 'Salvando Aluno');
       try {
         await window.studentService.saveStudent({ id, name, registration, grade, turma });
-        alert('Aluno salvo com sucesso!');
+        hideLoadingModal();
         closeStudentModal();
         renderStudentsTable();
+        await showAlertModal({
+          title: 'Aluno Salvo',
+          message: `O cadastro do aluno "${name}" foi salvo com sucesso!`,
+          type: 'success'
+        });
       } catch (err) {
-        alert(err.message || 'Erro ao salvar aluno.');
+        hideLoadingModal();
+        await showAlertModal({
+          title: 'Erro ao Salvar',
+          message: err.message || 'Ocorreu um erro ao salvar o aluno.',
+          type: 'danger'
+        });
       }
     });
   }
@@ -128,16 +145,35 @@ document.addEventListener('DOMContentLoaded', async () => {
       const studentId = document.getElementById('student-id').value;
       if (!studentId) return;
 
-      if (confirm('Atenção: O QR Code antigo será REVOGADO imediatamente e não poderá mais ser usado no refeitório. Deseja gerar um novo QR Code?')) {
+      const confirmReissue = await showConfirmModal({
+        title: 'Revogar & Gerar Novo QR Code',
+        message: 'Atenção: O QR Code antigo será REVOGADO imediatamente e não poderá mais ser usado no refeitório. Deseja gerar um novo QR Code?',
+        icon: '🔄',
+        confirmText: 'Sim, Revogar e Gerar Novo',
+        cancelText: 'Cancelar',
+        isDanger: true
+      });
+
+      if (confirmReissue) {
+        showLoadingModal('Gerando novo token e atualizando na nuvem...', 'Revogando QR Code');
         try {
           const newToken = await window.studentService.reissueQrCode(studentId);
-          alert('Novo QR Code gerado com sucesso! O código antigo foi revogado.');
-          
+          hideLoadingModal();
           const student = await window.dbEngine.get('students', studentId);
           showQrCodeInModal(student);
           renderStudentsTable();
+          await showAlertModal({
+            title: 'QR Code Revogado',
+            message: 'Novo QR Code gerado com sucesso! O código antigo foi revogado.',
+            type: 'success'
+          });
         } catch (err) {
-          alert('Erro ao reemitir QR Code: ' + err.message);
+          hideLoadingModal();
+          await showAlertModal({
+            title: 'Erro na Revogação',
+            message: 'Erro ao reemitir QR Code: ' + err.message,
+            type: 'danger'
+          });
         }
       }
     });
@@ -170,19 +206,40 @@ document.addEventListener('DOMContentLoaded', async () => {
       const file = e.target.files[0];
       if (!file) return;
 
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        try {
-          const jsonData = JSON.parse(event.target.result);
-          await window.dbEngine.importDatabaseJson(jsonData);
-          alert('Backup do banco de dados restaurado com sucesso!');
-          renderStudentsTable();
-          refreshDashboardView();
-        } catch (err) {
-          alert('Erro ao importar backup: ' + err.message);
-        }
-      };
-      reader.readAsText(file);
+      const confirmImport = await showConfirmModal({
+        title: 'Restaurar Backup do Banco',
+        message: 'Deseja importar e mesclar todos os dados do arquivo de backup (.JSON) selecionado?',
+        icon: '📂',
+        confirmText: 'Sim, Restaurar Backup',
+        cancelText: 'Cancelar'
+      });
+
+      if (confirmImport) {
+        showLoadingModal('Importando dados e restaurando tabelas...', 'Restaurando Backup');
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          try {
+            const jsonData = JSON.parse(event.target.result);
+            await window.dbEngine.importDatabaseJson(jsonData);
+            hideLoadingModal();
+            renderStudentsTable();
+            refreshDashboardView();
+            await showAlertModal({
+              title: 'Backup Restaurado',
+              message: 'Todos os alunos e registros de refeições foram restaurados com sucesso!',
+              type: 'success'
+            });
+          } catch (err) {
+            hideLoadingModal();
+            await showAlertModal({
+              title: 'Erro na Restauração',
+              message: 'Erro ao importar arquivo de backup: ' + err.message,
+              type: 'danger'
+            });
+          }
+        };
+        reader.readAsText(file);
+      }
     });
   }
 
@@ -205,6 +262,95 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 });
+
+// ------------------------------------------------------------------------
+// CUSTOM SYSTEM DIALOG HELPERS (MODALS & TOASTS)
+// ------------------------------------------------------------------------
+
+function showConfirmModal({ title = 'Confirmação', message = '', icon = '⚠️', confirmText = 'Confirmar', cancelText = 'Cancelar', isDanger = false }) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-confirm');
+    const titleEl = document.getElementById('sys-confirm-title');
+    const msgEl = document.getElementById('sys-confirm-message');
+    const iconEl = document.getElementById('sys-confirm-icon');
+    const btnOk = document.getElementById('btn-sys-confirm-ok');
+    const btnCancel = document.getElementById('btn-sys-confirm-cancel');
+
+    if (!modal) return resolve(false);
+
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = message;
+    if (iconEl) iconEl.textContent = icon;
+    if (btnOk) {
+      btnOk.textContent = confirmText;
+      btnOk.className = isDanger ? 'btn btn-danger' : 'btn btn-primary';
+    }
+    if (btnCancel) btnCancel.textContent = cancelText;
+
+    const cleanup = () => {
+      modal.classList.remove('active');
+      btnOk.removeEventListener('click', onOk);
+      btnCancel.removeEventListener('click', onCancel);
+    };
+
+    const onOk = () => { cleanup(); resolve(true); };
+    const onCancel = () => { cleanup(); resolve(false); };
+
+    btnOk.addEventListener('click', onOk);
+    btnCancel.addEventListener('click', onCancel);
+
+    modal.classList.add('active');
+  });
+}
+
+function showAlertModal({ title = 'Aviso', message = '', type = 'info', icon = null }) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('modal-alert');
+    const titleEl = document.getElementById('sys-alert-title');
+    const msgEl = document.getElementById('sys-alert-message');
+    const iconEl = document.getElementById('sys-alert-icon');
+    const btnOk = document.getElementById('btn-sys-alert-ok');
+
+    if (!modal) return resolve();
+
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = message;
+    
+    if (iconEl) {
+      if (icon) iconEl.textContent = icon;
+      else if (type === 'success') iconEl.textContent = '✅';
+      else if (type === 'danger' || type === 'error') iconEl.textContent = '❌';
+      else if (type === 'warning') iconEl.textContent = '⚠️';
+      else iconEl.textContent = 'ℹ️';
+    }
+
+    const onOk = () => {
+      modal.classList.remove('active');
+      btnOk.removeEventListener('click', onOk);
+      resolve();
+    };
+
+    btnOk.addEventListener('click', onOk);
+    modal.classList.add('active');
+  });
+}
+
+function showLoadingModal(message = 'Conectando com o servidor...', title = 'Processando...') {
+  const modal = document.getElementById('modal-loading');
+  const titleEl = document.getElementById('sys-loading-title');
+  const msgEl = document.getElementById('sys-loading-message');
+
+  if (modal) {
+    if (titleEl) titleEl.textContent = title;
+    if (msgEl) msgEl.textContent = message;
+    modal.classList.add('active');
+  }
+}
+
+function hideLoadingModal() {
+  const modal = document.getElementById('modal-loading');
+  if (modal) modal.classList.remove('active');
+}
 
 // ------------------------------------------------------------------------
 // GLOBAL UI RENDER FUNCTIONS
@@ -278,14 +424,34 @@ async function renderStudentsTable() {
 }
 
 async function confirmDeleteStudent(id, name) {
-  if (confirm(`⚠️ ATENÇÃO: Tem certeza que deseja EXCLUIR PERMANENTEMENTE o cadastro do aluno "${name}"?\nEsta ação não poderá ser desfeita.`)) {
+  const confirmed = await showConfirmModal({
+    title: 'Excluir Aluno Permanentemente',
+    message: `⚠️ ATENÇÃO: Tem certeza que deseja EXCLUIR PERMANENTEMENTE o cadastro do aluno "${name}"?\nEsta ação removerá o aluno da nuvem e não poderá ser desfeita.`,
+    icon: '🗑️',
+    confirmText: 'Sim, Excluir Aluno',
+    cancelText: 'Cancelar',
+    isDanger: true
+  });
+
+  if (confirmed) {
+    showLoadingModal('Removendo aluno do servidor e do banco de dados...', 'Excluindo Aluno');
     try {
       await window.studentService.deleteStudent(id);
-      alert(`Aluno "${name}" excluído com sucesso!`);
+      hideLoadingModal();
       renderStudentsTable();
       refreshDashboardView();
+      await showAlertModal({
+        title: 'Aluno Excluído',
+        message: `O cadastro do aluno "${name}" foi excluído permanentemente.`,
+        type: 'success'
+      });
     } catch (err) {
-      alert('Erro ao excluir aluno: ' + err.message);
+      hideLoadingModal();
+      await showAlertModal({
+        title: 'Erro ao Excluir',
+        message: 'Erro ao excluir aluno: ' + err.message,
+        type: 'danger'
+      });
     }
   }
 }
@@ -335,9 +501,24 @@ function closeStudentModal() {
 }
 
 async function toggleStudentStatus(id) {
-  if (confirm('Deseja alterar o status (Ativo/Inativo) deste aluno?')) {
-    await window.studentService.toggleActive(id);
-    renderStudentsTable();
+  const confirmToggle = await showConfirmModal({
+    title: 'Alterar Status do Aluno',
+    message: 'Deseja alterar o status (Ativo/Inativo) deste aluno?',
+    icon: '🔄',
+    confirmText: 'Sim, Alterar Status',
+    cancelText: 'Cancelar'
+  });
+
+  if (confirmToggle) {
+    showLoadingModal('Atualizando status no servidor...', 'Processando');
+    try {
+      await window.studentService.toggleActive(id);
+      hideLoadingModal();
+      renderStudentsTable();
+    } catch (err) {
+      hideLoadingModal();
+      await showAlertModal({ title: 'Erro', message: err.message, type: 'danger' });
+    }
   }
 }
 
@@ -350,7 +531,11 @@ async function refreshDashboardView() {
   }
 }
 
-// Make modal helper functions globally accessible for inline onclick handlers
+// Make modal helper functions globally accessible
 window.openEditStudentModal = openEditStudentModal;
 window.toggleStudentStatus = toggleStudentStatus;
 window.confirmDeleteStudent = confirmDeleteStudent;
+window.showConfirmModal = showConfirmModal;
+window.showAlertModal = showAlertModal;
+window.showLoadingModal = showLoadingModal;
+window.hideLoadingModal = hideLoadingModal;

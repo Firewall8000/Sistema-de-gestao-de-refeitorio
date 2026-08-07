@@ -82,7 +82,13 @@ class QrScannerController {
 
     } catch (err) {
       console.error('❌ Erro ao acessar a câmera:', err);
-      alert('Não foi possível acessar a câmera do dispositivo. Verifique a permissão do navegador ou utilize a busca manual por Matrícula.');
+      if (typeof window.showAlertModal === 'function') {
+        window.showAlertModal({
+          title: 'Acesso à Câmera',
+          message: 'Não foi possível acessar a câmera do dispositivo. Verifique a permissão do navegador ou utilize a busca manual por Matrícula.',
+          type: 'warning'
+        });
+      }
       this.stopCamera();
     }
   }
