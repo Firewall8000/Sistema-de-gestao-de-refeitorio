@@ -1,6 +1,6 @@
 /* ==========================================================================
    SANTOS DUMONT - REFECTORY QR SYSTEM
-   Camera QR Scanner Controller & File Upload Decoder (Html5Qrcode Engine)
+   Dual-Engine QR Scanner Controller (Html5Qrcode + jsQR Integration)
    ========================================================================== */
 
 class QrScannerController {
@@ -9,6 +9,8 @@ class QrScannerController {
     this.isScanning = false;
     this.lastScannedToken = null;
     this.cooldownTimer = null;
+    this.videoStream = null;
+    this.jsQrInterval = null;
   }
 
   /**
@@ -31,7 +33,7 @@ class QrScannerController {
       if (btnStart) btnStart.style.display = 'none';
       if (btnStop) btnStop.style.display = 'inline-flex';
 
-      // Ensure scanner element exists
+      // Ensure reader container element exists
       let readerDiv = document.getElementById('html5qr-reader');
       if (!readerDiv) {
         readerDiv = document.createElement('div');
@@ -45,7 +47,7 @@ class QrScannerController {
         this.html5Qrcode = new Html5Qrcode('html5qr-reader');
 
         const qrConfig = {
-          fps: 12, // 10 to 15 FPS
+          fps: 12,
           qrbox: (viewfinderWidth, viewfinderHeight) => {
             const minDim = Math.min(viewfinderWidth, viewfinderHeight);
             const boxSize = Math.floor(minDim * 0.85);
@@ -62,24 +64,72 @@ class QrScannerController {
           { facingMode: 'environment' },
           qrConfig,
           (decodedText) => this.handleDecodedToken(decodedText),
-          () => {} // silent frame scan error callback
+          () => {} // silent frame scan callback
         );
         this.isScanning = true;
       } else {
-        throw new Error('Biblioteca Html5Qrcode não encontrada.');
+        // Fallback HTML5 video + jsQR decoder
+        await this._startJsQrCameraFallback(container);
       }
 
     } catch (err) {
       console.error('❌ Erro ao iniciar scanner de QR Code:', err);
-      if (typeof window.showAlertModal === 'function') {
-        window.showAlertModal({
-          title: 'Acesso à Câmera',
-          message: 'Não foi possível iniciar a câmera. Verifique a permissão do navegador ou utilize a busca manual por Matrícula.',
-          type: 'warning'
-        });
+      // Fallback try with jsQR
+      try {
+        await this._startJsQrCameraFallback(container);
+      } catch (fallbackErr) {
+        if (typeof window.showAlertModal === 'function') {
+          window.showAlertModal({
+            title: 'Acesso à Câmera',
+            message: 'Não foi possível iniciar a câmera. Verifique as permissões do navegador ou utilize a busca manual por Matrícula.',
+            type: 'warning'
+          });
+        }
+        this.stopCamera();
       }
-      this.stopCamera();
     }
+  }
+
+  /**
+   * Fallback camera loop using jsQR decoder engine.
+   */
+  async _startJsQrCameraFallback(container) {
+    const constraints = { video: { facingMode: { ideal: 'environment' } } };
+    this.videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+    
+    let video = document.getElementById('qr-video');
+    if (!video) {
+      video = document.createElement('video');
+      video.id = 'qr-video';
+      video.style.width = '100%';
+      video.style.height = '100%';
+      video.style.objectFit = 'cover';
+      if (container) container.appendChild(video);
+    }
+    video.srcObject = this.videoStream;
+    await video.play();
+    this.isScanning = true;
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+
+    this.jsQrInterval = setInterval(() => {
+      if (!this.isScanning || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      if (typeof jsQR !== 'undefined') {
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: "dontInvert"
+        });
+        if (code && code.data) {
+          this.handleDecodedToken(code.data);
+        }
+      }
+    }, 250);
   }
 
   /**
@@ -87,6 +137,11 @@ class QrScannerController {
    */
   async stopCamera() {
     this.isScanning = false;
+
+    if (this.jsQrInterval) {
+      clearInterval(this.jsQrInterval);
+      this.jsQrInterval = null;
+    }
 
     if (this.html5Qrcode) {
       try {
@@ -96,14 +151,21 @@ class QrScannerController {
       this.html5Qrcode = null;
     }
 
+    if (this.videoStream) {
+      this.videoStream.getTracks().forEach(track => track.stop());
+      this.videoStream = null;
+    }
+
     const container = document.getElementById('camera-container');
     const placeholder = document.getElementById('camera-placeholder');
     const scanLine = document.getElementById('scan-line');
     const btnStart = document.getElementById('btn-start-camera');
     const btnStop = document.getElementById('btn-stop-camera');
     const readerDiv = document.getElementById('html5qr-reader');
+    const rawVideo = document.getElementById('qr-video');
 
     if (readerDiv) readerDiv.remove();
+    if (rawVideo) rawVideo.style.display = 'none';
     if (placeholder) placeholder.style.display = 'block';
     if (scanLine) scanLine.style.display = 'none';
     if (container) container.classList.remove('scanning');
@@ -113,52 +175,92 @@ class QrScannerController {
   }
 
   /**
-   * Decodes a QR Code from an uploaded image file (Test feature & Fallback).
+   * Decodes a QR Code from an uploaded image file (Dual Engine: Html5Qrcode + jsQR).
    */
   async scanImageFile(file) {
     if (!file) return;
 
+    if (typeof window.showLoadingModal === 'function') {
+      window.showLoadingModal('Processando imagem do QR Code...', 'Decodificando Imagem');
+    }
+
     try {
-      if (typeof window.showLoadingModal === 'function') {
-        window.showLoadingModal('Processando imagem do QR Code...', 'Decodificando Imagem');
-      }
-
-      let scannerInstance = this.html5Qrcode;
-      let tempDivCreated = false;
-
-      if (!scannerInstance && typeof Html5Qrcode !== 'undefined') {
-        let tempDiv = document.getElementById('temp-qr-reader');
-        if (!tempDiv) {
-          tempDiv = document.createElement('div');
-          tempDiv.id = 'temp-qr-reader';
-          tempDiv.style.display = 'none';
-          document.body.appendChild(tempDiv);
-          tempDivCreated = true;
+      // 1. Try Html5Qrcode scanFile engine
+      if (typeof Html5Qrcode !== 'undefined') {
+        try {
+          let tempDiv = document.getElementById('temp-qr-reader');
+          if (!tempDiv) {
+            tempDiv = document.createElement('div');
+            tempDiv.id = 'temp-qr-reader';
+            tempDiv.style.display = 'none';
+            document.body.appendChild(tempDiv);
+          }
+          const html5QrInstance = new Html5Qrcode('temp-qr-reader');
+          const decodedText = await html5QrInstance.scanFile(file, true);
+          try { html5QrInstance.clear(); } catch (e) {}
+          if (decodedText) {
+            if (typeof window.hideLoadingModal === 'function') window.hideLoadingModal();
+            await this.handleDecodedToken(decodedText);
+            return;
+          }
+        } catch (hErr) {
+          console.warn('⚠️ Html5Qrcode scanFile falhou, tentando motor jsQR...', hErr);
         }
-        scannerInstance = new Html5Qrcode('temp-qr-reader');
       }
 
-      if (scannerInstance && typeof scannerInstance.scanFile === 'function') {
-        const decodedText = await scannerInstance.scanFile(file, true);
+      // 2. Try jsQR canvas engine
+      const decodedToken = await this._scanImageWithJsQr(file);
+      if (decodedToken) {
         if (typeof window.hideLoadingModal === 'function') window.hideLoadingModal();
-        if (tempDivCreated && scannerInstance) {
-          try { scannerInstance.clear(); } catch (e) {}
-        }
-        await this.handleDecodedToken(decodedText);
-      } else {
-        throw new Error('Mecanismo de decodificação de imagem indisponível.');
+        await this.handleDecodedToken(decodedToken);
+        return;
       }
+
+      throw new Error('Nenhum decodificador conseguiu ler o QR Code da imagem.');
+
     } catch (err) {
       if (typeof window.hideLoadingModal === 'function') window.hideLoadingModal();
       console.error('❌ Erro ao decodificar imagem de QR Code:', err);
       if (typeof window.showAlertModal === 'function') {
         window.showAlertModal({
           title: 'Leitura de Imagem',
-          message: 'Não foi possível decodificar um QR Code válido na imagem selecionada.',
+          message: 'Não foi possível decodificar um QR Code válido na imagem selecionada. Tente gerar um novo crachá no sistema.',
           type: 'warning'
         });
       }
     }
+  }
+
+  /**
+   * Helper to decode image file using jsQR canvas engine.
+   */
+  _scanImageWithJsQr(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          if (typeof jsQR !== 'undefined') {
+            const code = jsQR(imageData.data, imageData.width, imageData.height);
+            if (code && code.data) {
+              return resolve(code.data);
+            }
+          }
+          resolve(null);
+        };
+        img.onerror = () => resolve(null);
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
   }
 
   /**
