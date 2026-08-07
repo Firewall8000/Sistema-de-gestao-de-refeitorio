@@ -224,13 +224,42 @@ class StudentService {
   }
 
   /**
-   * Filters student list by search query and grade.
+   * Permanently deletes a student record from Cloud and Local DB.
    */
-  async filterStudents(query = '', grade = '') {
+  async deleteStudent(studentId) {
+    if (window.supabaseClient && navigator.onLine) {
+      try {
+        const { error } = await window.supabaseClient
+          .from('students')
+          .delete()
+          .eq('id', studentId);
+
+        if (error) {
+          console.error('❌ Erro Supabase ao deletar aluno:', error.message);
+        } else {
+          console.log('🗑️ Aluno deletado do Supabase Cloud:', studentId);
+        }
+      } catch (err) {
+        console.warn('⚠️ Falha ao deletar aluno do Supabase Cloud:', err);
+      }
+    }
+
+    return await window.dbEngine.delete('students', studentId);
+  }
+
+  /**
+   * Filters student list by search query, grade, and turma.
+   */
+  async filterStudents(query = '', grade = '', turma = '') {
     let list = await this.getAllStudents();
 
     if (grade) {
       list = list.filter(s => s.grade === grade);
+    }
+
+    if (turma) {
+      const t = turma.toLowerCase().trim();
+      list = list.filter(s => s.turma && s.turma.toLowerCase().trim() === t);
     }
 
     if (query.trim()) {

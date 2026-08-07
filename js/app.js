@@ -84,8 +84,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Student Search & Filter Events
   const searchInput = document.getElementById('search-student');
   const gradeFilter = document.getElementById('filter-grade');
+  const turmaFilter = document.getElementById('filter-turma');
   if (searchInput) searchInput.addEventListener('input', () => renderStudentsTable());
   if (gradeFilter) gradeFilter.addEventListener('change', () => renderStudentsTable());
+  if (turmaFilter) turmaFilter.addEventListener('change', () => renderStudentsTable());
 
   // Modal Open / Close Controls
   const modalStudent = document.getElementById('modal-student');
@@ -212,6 +214,22 @@ async function refreshAllUI() {
   if (window.mealValidatorService) {
     await window.mealValidatorService.updateTodayCounterUI();
   }
+  renderStudentsTable();
+}
+
+async function updateTurmaFilterOptions(allStudents) {
+  const turmaSelect = document.getElementById('filter-turma');
+  if (!turmaSelect) return;
+
+  const currentVal = turmaSelect.value;
+  const uniqueTurmas = Array.from(new Set(allStudents.map(s => s.turma).filter(Boolean))).sort();
+
+  turmaSelect.innerHTML = '<option value="">Todas as Turmas</option>' + 
+    uniqueTurmas.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  if (uniqueTurmas.includes(currentVal)) {
+    turmaSelect.value = currentVal;
+  }
 }
 
 async function renderStudentsTable() {
@@ -220,8 +238,12 @@ async function renderStudentsTable() {
 
   const query = document.getElementById('search-student')?.value || '';
   const grade = document.getElementById('filter-grade')?.value || '';
+  const turma = document.getElementById('filter-turma')?.value || '';
 
-  const students = await window.studentService.filterStudents(query, grade);
+  const allStudents = await window.studentService.getAllStudents();
+  updateTurmaFilterOptions(allStudents);
+
+  const students = await window.studentService.filterStudents(query, grade, turma);
 
   if (students.length === 0) {
     tbody.innerHTML = `
@@ -246,12 +268,26 @@ async function renderStudentsTable() {
       </td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="openEditStudentModal('${s.id}')">✏️ Editar / QR</button>
-        <button class="btn ${s.active ? 'btn-danger' : 'btn-success'} btn-sm" onclick="toggleStudentStatus('${s.id}')">
+        <button class="btn ${s.active ? 'btn-warning' : 'btn-success'} btn-sm" onclick="toggleStudentStatus('${s.id}')">
           ${s.active ? '🚫 Desativar' : '✅ Ativar'}
         </button>
+        <button class="btn btn-danger btn-sm" onclick="confirmDeleteStudent('${s.id}', '${s.name}')" title="Excluir aluno permanentemente">🗑️ Excluir</button>
       </td>
     </tr>
   `).join('');
+}
+
+async function confirmDeleteStudent(id, name) {
+  if (confirm(`⚠️ ATENÇÃO: Tem certeza que deseja EXCLUIR PERMANENTEMENTE o cadastro do aluno "${name}"?\nEsta ação não poderá ser desfeita.`)) {
+    try {
+      await window.studentService.deleteStudent(id);
+      alert(`Aluno "${name}" excluído com sucesso!`);
+      renderStudentsTable();
+      refreshDashboardView();
+    } catch (err) {
+      alert('Erro ao excluir aluno: ' + err.message);
+    }
+  }
 }
 
 async function openStudentModal() {
@@ -317,3 +353,4 @@ async function refreshDashboardView() {
 // Make modal helper functions globally accessible for inline onclick handlers
 window.openEditStudentModal = openEditStudentModal;
 window.toggleStudentStatus = toggleStudentStatus;
+window.confirmDeleteStudent = confirmDeleteStudent;
