@@ -1,6 +1,6 @@
 /* ==========================================================================
    SANTOS DUMONT - REFECTORY QR SYSTEM
-   Meal Validation & Daily Single-Meal Rule Engine (RN-001)
+   Meal Validation & Daily Single-Meal Rule Engine (Supabase Cloud + Hybrid)
    ========================================================================== */
 
 class MealValidatorService {
@@ -25,10 +25,47 @@ class MealValidatorService {
   }
 
   /**
-   * Checks if student already had lunch today.
+   * Helper to map Supabase meal_logs columns to JS object.
+   */
+  _mapFromSupabase(data) {
+    if (!data) return null;
+    if (Array.isArray(data)) return data.map(item => this._mapFromSupabase(item));
+    return {
+      id: data.id,
+      studentId: data.student_id || data.studentId,
+      studentRegistration: data.student_registration || data.studentRegistration,
+      studentName: data.student_name || data.studentName,
+      turma: data.turma,
+      grade: data.grade,
+      date: data.date,
+      timestamp: data.timestamp,
+      qrTokenUsed: data.qr_token_used || data.qrTokenUsed,
+      synced: data.synced !== undefined ? data.synced : true,
+      validationMethod: data.validation_method || data.validationMethod
+    };
+  }
+
+  /**
+   * Checks if student already had lunch today (Cloud + Local).
    */
   async getTodayMealForStudent(studentRegistration) {
     const today = this.getTodayDateString();
+
+    if (window.supabaseClient && navigator.onLine) {
+      try {
+        const { data, error } = await window.supabaseClient
+          .from('meal_logs')
+          .select('*')
+          .eq('date', today)
+          .eq('student_registration', studentRegistration)
+          .maybeSingle();
+
+        if (!error && data) {
+          return this._mapFromSupabase(data);
+        }
+      } catch (e) {}
+    }
+
     const allTodayMeals = await window.dbEngine.getAllByIndex('meal_logs', 'date', today);
     return allTodayMeals.find(m => m.studentRegistration === studentRegistration) || null;
   }
@@ -38,6 +75,20 @@ class MealValidatorService {
    */
   async getTodayMealsCount() {
     const today = this.getTodayDateString();
+
+    if (window.supabaseClient && navigator.onLine) {
+      try {
+        const { count, error } = await window.supabaseClient
+          .from('meal_logs')
+          .select('*', { count: 'exact', head: true })
+          .eq('date', today);
+
+        if (!error && count !== null) {
+          return count;
+        }
+      } catch (e) {}
+    }
+
     const meals = await window.dbEngine.getAllByIndex('meal_logs', 'date', today);
     return meals.length;
   }
@@ -95,7 +146,7 @@ class MealValidatorService {
       return false;
     }
 
-    // 5. Success! Record Meal Log in IndexedDB
+    // 5. Success! Record Meal Log
     const nowIso = new Date().toISOString();
     const mealLog = {
       id: 'meal-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -111,6 +162,30 @@ class MealValidatorService {
       validationMethod: method
     };
 
+    // Send to Supabase Cloud
+    if (window.supabaseClient && navigator.onLine) {
+      try {
+        const row = {
+          id: mealLog.id,
+          student_id: mealLog.studentId,
+          student_registration: mealLog.studentRegistration,
+          student_name: mealLog.studentName,
+          turma: mealLog.turma,
+          grade: mealLog.grade,
+          date: mealLog.date,
+          timestamp: mealLog.timestamp,
+          qr_token_used: mealLog.qrTokenUsed,
+          synced: true,
+          validation_method: mealLog.validationMethod
+        };
+        const { error } = await window.supabaseClient.from('meal_logs').insert(row);
+        if (error) console.error('❌ Erro Supabase ao registrar refeição:', error.message);
+      } catch (err) {
+        console.warn('⚠️ Falha de rede ao registrar refeição na nuvem:', err);
+      }
+    }
+
+    // Always record locally in IndexedDB cache
     await window.dbEngine.put('meal_logs', mealLog);
 
     // 6. Display Success Banner
@@ -154,7 +229,6 @@ class MealValidatorService {
     if (detailEl) detailEl.textContent = detail;
     if (subEl) subEl.textContent = sub;
 
-    // Auto-scroll banner into view for refectory operator
     banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 

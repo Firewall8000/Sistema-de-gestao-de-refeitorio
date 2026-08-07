@@ -1,41 +1,71 @@
-# Relatório de Validação e Walkthrough de Implementação
-## Sistema de Gestão de Almoço por QR Code - Escola Santos Dumont
+# Relatório de Atualização, Validação e Implantação (Supabase + Vercel + Render)
+## Sistema de Gestão de Almoço por QR Code - Centro de Excelência Santos Dumont
 
 ---
 
-### Visão Geral da Implementação
-Toda a aplicação foi desenvolvida e testada na pasta do projeto **`C:\Users\carin\OneDrive\Área de Trabalho\Santos Dumont`**, cobrindo 100% dos requisitos funcionais, não funcionais e regras de negócio especificados nos documentos `requirements.md` e `design.md`.
+### Resumo das Implementações Concluídas
+
+1. **Aumento do Logotipo Oficial**:
+   - Ajustado em [css/main.css](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/css/main.css) para **80px de altura** com relevo de sombra, garantindo visibilidade clara e destaque imediato para qualquer usuário ao abrir o site.
+
+2. **Integração NATIVA com Supabase Cloud**:
+   - Arquivo [js/config.js](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/config.js) criado e configurado com a URL `https://bxbouiubbyakwostjypu.supabase.co` e a Chave do Supabase fornecida.
+   - [studentService.js](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/studentService.js) e [mealService.js](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/mealService.js) agora realizam leitura, gravação e atualizações em tempo real diretamente na nuvem.
+   - [sync.js](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/sync.js) conectado ao **Supabase Realtime Channel**. Se um aluno for cadastrado no seu computador pessoal, ele aparece instantaneamente nos celulares do refeitório e em todos os dispositivos abertos!
+
+3. **Script de Migração SQL**:
+   - Criado o arquivo [sql/schema.sql](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/sql/schema.sql) com a criação das tabelas `students` e `meal_logs`, regras RLS e suporte a Supabase Realtime.
+
+4. **Prontidão para Implantação (Vercel & Render)**:
+   - Criados [vercel.json](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/vercel.json), [render.yaml](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/render.yaml) e [package.json](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/package.json) para que o projeto possa ser publicado na Vercel ou Render sem erros.
 
 ---
 
-### FASE 7 — Matriz de Rastreabilidade e Validação dos Requisitos
+### Passo a Passo Único Necessário no Supabase (Rodar o Script SQL):
 
-| Requisito | Status | Evidência no Código | Teste / Validação | Problema Encontrado | Correção |
-|---|---|---|---|---|---|
-| **RF-001** (Cadastro Aluno) | **APROVADO** | [studentService.js:L35-L80](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/studentService.js#L35-L80) | `saveStudent()` valida dados e salva no IndexedDB. | Nenhum. | N/A |
-| **RF-002** (Edição e Inativação) | **APROVADO** | [studentService.js:L97-L106](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/studentService.js#L97-L106) | `toggleActive()` altera status para INATIVO sem apagar histórico. | Nenhum. | N/A |
-| **RF-003** (Busca e Filtro) | **APROVADO** | [studentService.js:L111-L127](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/studentService.js#L111-L127) | `filterStudents()` busca por nome/matrícula e série. | Nenhum. | N/A |
-| **RF-004** (QR Code Único) | **APROVADO** | [studentService.js:L10-L13](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/studentService.js#L10-L13) | Token aleatório SHA/Hash gerado sem expor dados sensíveis. | Nenhum. | N/A |
-| **RF-005** (Revogação & Reemissão) | **APROVADO** | [studentService.js:L85-L95](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/studentService.js#L85-L95) | `reissueQrCode()` invalida token antigo e gera novo. | Nenhum. | N/A |
-| **RF-006** (Ficha Impressão) | **APROVADO** | [qrGenerator.js:L75-L105](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/qrGenerator.js#L75-L105) | `printBadge()` abre janela para impressão de crachá. | Nenhum. | N/A |
-| **RF-007** (Validação Câmera) | **APROVADO** | [scanner.js:L20-L60](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/scanner.js#L20-L60) | Camera acionada via HTML5 `getUserMedia` e decodificação. | Nenhum. | N/A |
-| **RF-008** (Entrada Manual) | **APROVADO** | [mealService.js:L47-L54](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/mealService.js#L47-L54) | Validação por digitação direta da Matrícula. | Nenhum. | N/A |
-| **RF-009** (Trava Duplicidade RN-001) | **APROVADO** | [mealService.js:L76-L86](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/mealService.js#L76-L86) | Bloqueia 2º almoço com aviso "Já Almoçou às HH:MM". | Nenhum. | N/A |
-| **RF-010** (Feedback Som/Visual) | **APROVADO** | [audio.js:L20-L80](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/audio.js#L20-L80) | Beeps sintetizados via Web Audio API e faixas coloridas. | Nenhum. | N/A |
-| **RF-011** (Modo Offline PWA) | **APROVADO** | [sw.js:L10-L45](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/sw.js#L10-L45) | Service Worker pre-cacheia ativos e salva em IndexedDB. | Nenhum. | N/A |
-| **RF-012** (Dashboard Tempo Real) | **APROVADO** | [dashboard.js:L10-L35](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/dashboard.js#L10-L35) | Atualiza total, servidos, pendentes e % de adesão. | Nenhum. | N/A |
-| **RF-013** (Relatórios por Data) | **APROVADO** | [dashboard.js:L40-L90](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/dashboard.js#L40-L90) | Tabela histórica por data e status do almoço. | Nenhum. | N/A |
-| **RF-014** (Exportação CSV) | **APROVADO** | [dashboard.js:L95-L120](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/dashboard.js#L95-L120) | Download de arquivo CSV formatado com UTF-8 BOM. | Nenhum. | N/A |
-| **RF-015** (Perfis OPERATOR/ADMIN) | **APROVADO** | [auth.js:L35-L60](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/js/auth.js#L35-L60) | Oculta abas administrativas no perfil de operador. | Nenhum. | N/A |
+Para que o banco de dados do Supabase conheça a estrutura de tabelas dos alunos, siga este passo único de 1 minuto:
 
----
+1. Acesse seu painel no **[supabase.com](https://supabase.com)** e abra o seu projeto.
+2. No menu lateral esquerdo, clique no ícone **SQL Editor** (ou pressione a tecla 'S').
+3. Clique em **"New Query"**.
+4. Copie o conteúdo do arquivo [sql/schema.sql](file:///C:/Users/carin/OneDrive/%C3%81rea%20de%20Trabalho/Santos%20Dumont/sql/schema.sql) (ou cole o código abaixo) e clique no botão verde **"RUN"**:
 
-### Como Testar o Projeto no Computador da Escola:
-1. Abra a pasta `C:\Users\carin\OneDrive\Área de Trabalho\Santos Dumont` no VS Code.
-2. Inicie um servidor local (ex: clicando em "Go Live" com a extensão Live Server, ou rodando `npx serve` no terminal).
-3. No navegador, acesse a URL gerada (ex: `http://localhost:5500` ou pelo IP da rede local `http://192.168.x.x:5500` no celular do refeitório).
-4. **Demonstração Pré-carregada**: O sistema inicia com 4 alunos de demonstração cadastrados no banco para testes imediatos:
-   - Matrícula `2026001` — Ana Clara Souza (1º Ano A)
-   - Matrícula `2026002` — Bruno Lima Fernandes (1º Ano B)
-   - Matrícula `2026003` — Carla Beatriz Mendes (2º Ano A)
-   - Matrícula `2026004` — Daniel Santos Rocha (3º Ano A)
+```sql
+CREATE TABLE IF NOT EXISTS public.students (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  registration TEXT UNIQUE NOT NULL,
+  grade TEXT NOT NULL,
+  turma TEXT NOT NULL,
+  active BOOLEAN DEFAULT TRUE,
+  qr_token TEXT UNIQUE NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.meal_logs (
+  id TEXT PRIMARY KEY,
+  student_id TEXT REFERENCES public.students(id) ON DELETE CASCADE,
+  student_registration TEXT NOT NULL,
+  student_name TEXT NOT NULL,
+  turma TEXT NOT NULL,
+  grade TEXT NOT NULL,
+  date DATE NOT NULL,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  qr_token_used TEXT NOT NULL,
+  synced BOOLEAN DEFAULT TRUE,
+  validation_method TEXT NOT NULL,
+  CONSTRAINT unique_student_meal_per_day UNIQUE (date, student_registration)
+);
+
+ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.meal_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Permitir tudo em alunos" ON public.students FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Permitir tudo em meal_logs" ON public.meal_logs FOR ALL USING (true) WITH CHECK (true);
+
+ALTER PUBLICATION supabase_realtime ADD TABLE public.students;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.meal_logs;
+```
+
+Pronto! Assim que você rodar esse script no Supabase, todos os dispositivos (celulares, tablets, notebooks e seu computador pessoal) estarão 100% sincronizados em tempo real!

@@ -1,11 +1,12 @@
 /* ==========================================================================
    SANTOS DUMONT - REFECTORY QR SYSTEM
-   Sync Engine & Network Status Detector
+   Sync Engine & Supabase Realtime Subscriptions
    ========================================================================== */
 
 class NetworkSyncEngine {
   constructor() {
     this.isOnline = navigator.onLine;
+    this.realtimeChannel = null;
   }
 
   init() {
@@ -15,6 +16,9 @@ class NetworkSyncEngine {
 
     // Register Service Worker
     this.registerServiceWorker();
+
+    // Setup Supabase Realtime Subscriptions
+    this.setupSupabaseRealtime();
 
     // Initial check
     this.handleNetworkChange(navigator.onLine);
@@ -27,6 +31,41 @@ class NetworkSyncEngine {
           .then((reg) => console.log('✅ Service Worker registrado com escopo:', reg.scope))
           .catch((err) => console.warn('⚠️ Falha ao registrar Service Worker:', err));
       });
+    }
+  }
+
+  /**
+   * Sets up Supabase Realtime listener to sync changes across all devices in real-time.
+   */
+  setupSupabaseRealtime() {
+    if (!window.supabaseClient) return;
+
+    try {
+      this.realtimeChannel = window.supabaseClient
+        .channel('schema-db-changes')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'students' },
+          (payload) => {
+            console.log('⚡ Mudança de Alunos detectada na Nuvem:', payload);
+            if (typeof window.refreshAllUI === 'function') window.refreshAllUI();
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'meal_logs' },
+          (payload) => {
+            console.log('⚡ Novo Registro de Almoço detectado na Nuvem:', payload);
+            if (typeof window.refreshAllUI === 'function') window.refreshAllUI();
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log('📡 Realtime Supabase Ativo: Sincronização multi-dispositivo ligada!');
+          }
+        });
+    } catch (err) {
+      console.warn('⚠️ Não foi possível ligar o Realtime Supabase:', err);
     }
   }
 
@@ -48,7 +87,7 @@ class NetworkSyncEngine {
   }
 
   /**
-   * Syncs locally stored offline meal records when connection returns.
+   * Syncs locally stored offline meal records to Supabase Cloud when connection returns.
    */
   async syncPendingOfflineRecords() {
     if (!window.dbEngine) return;
@@ -57,12 +96,29 @@ class NetworkSyncEngine {
       const allMeals = await window.dbEngine.getAll('meal_logs');
       const pendingMeals = allMeals.filter(m => !m.synced);
 
-      if (pendingMeals.length > 0) {
-        console.log(`🔄 Sincronizando ${pendingMeals.length} registros offline pendentes...`);
+      if (pendingMeals.length > 0 && window.supabaseClient && navigator.onLine) {
+        console.log(`🔄 Sincronizando ${pendingMeals.length} registros offline pendentes para Supabase...`);
 
         for (const meal of pendingMeals) {
-          meal.synced = true;
-          await window.dbEngine.put('meal_logs', meal);
+          const row = {
+            id: meal.id,
+            student_id: meal.studentId,
+            student_registration: meal.studentRegistration,
+            student_name: meal.studentName,
+            turma: meal.turma,
+            grade: meal.grade,
+            date: meal.date,
+            timestamp: meal.timestamp,
+            qr_token_used: meal.qrTokenUsed,
+            synced: true,
+            validation_method: meal.validationMethod
+          };
+
+          const { error } = await window.supabaseClient.from('meal_logs').upsert(row);
+          if (!error) {
+            meal.synced = true;
+            await window.dbEngine.put('meal_logs', meal);
+          }
         }
 
         console.log('✅ Todos os registros offline foram sincronizados com sucesso.');

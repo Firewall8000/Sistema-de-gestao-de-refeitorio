@@ -94,20 +94,20 @@ h1, h2, h3, h4, h5, h6 {
 .brand {
   display: flex;
   align-items: center;
-  gap: 0.85rem;
+  gap: 1.1rem;
 }
 
 .brand-logo-img {
-  height: 48px;
+  height: 80px;
   width: auto;
-  max-width: 160px;
+  max-width: 220px;
   object-fit: contain;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.4));
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.5));
   transition: transform var(--transition-fast);
 }
 
 .brand-logo-img:hover {
-  transform: scale(1.04);
+  transform: scale(1.05);
 }
 
 .brand-icon {

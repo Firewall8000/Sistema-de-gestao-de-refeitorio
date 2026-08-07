@@ -1,0 +1,19 @@
+{
+  "name": "santos-dumont-refectory-qr",
+  "version": "1.0.0",
+  "description": "Sistema de Gestão de Refeitório por QR Code com Supabase e PWA Offline - Centro de Excelência Santos Dumont",
+  "main": "index.html",
+  "scripts": {
+    "start": "npx serve .",
+    "dev": "npx serve ."
+  },
+  "keywords": [
+    "qr-code",
+    "refectory",
+    "supabase",
+    "pwa",
+    "school-management"
+  ],
+  "author": "Centro de Excelência Santos Dumont",
+  "license": "MIT"
+}
