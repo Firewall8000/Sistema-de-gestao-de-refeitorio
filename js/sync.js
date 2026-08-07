@@ -114,7 +114,10 @@ class NetworkSyncEngine {
             validation_method: meal.validationMethod
           };
 
-          const { error } = await window.supabaseClient.from('meal_logs').upsert(row);
+          const { error } = await window.supabaseClient.from('meal_logs').upsert(row, {
+            onConflict: 'date,student_registration',
+            ignoreDuplicates: true
+          });
           if (!error) {
             meal.synced = true;
             await window.dbEngine.put('meal_logs', meal);

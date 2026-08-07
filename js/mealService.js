@@ -162,7 +162,7 @@ class MealValidatorService {
       validationMethod: method
     };
 
-    // Send to Supabase Cloud
+    // Send to Supabase Cloud with Atomic Concurrency Check (Multi-Device Support)
     if (window.supabaseClient && navigator.onLine) {
       try {
         const row = {
@@ -178,8 +178,22 @@ class MealValidatorService {
           synced: true,
           validation_method: mealLog.validationMethod
         };
+
         const { error } = await window.supabaseClient.from('meal_logs').insert(row);
-        if (error) console.error('❌ Erro Supabase ao registrar refeição:', error.message);
+        
+        if (error) {
+          // Unique Constraint Violation Code 23505 (Duplicate meal attempt from another device)
+          if (error.code === '23505' || (error.message && error.message.toLowerCase().includes('unique'))) {
+            console.warn('⚠️ Tentativa de refeição duplicada detectada em outro ponto de leitura:', student.registration);
+            this.displayValidationResult({
+              success: false,
+              title: 'ALMOÇO JÁ REGISTRADO EM OUTRO DISPOSITIVO!',
+              detail: `${student.name} — ${student.grade} (${student.turma})`,
+              sub: 'Esta refeição acabou de ser concedida no outro leitor do refeitório.'
+            });
+            return false;
+          }
+        }
       } catch (err) {
         console.warn('⚠️ Falha de rede ao registrar refeição na nuvem:', err);
       }
