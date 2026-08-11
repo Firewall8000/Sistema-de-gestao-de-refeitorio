@@ -11,7 +11,6 @@ require('dotenv').config();
 const { apiRateLimiter } = require('./middleware/rateLimiter');
 const { globalErrorHandler } = require('./middleware/errorHandler');
 
-const authRoutes = require('./routes/authRoutes');
 const studentRoutes = require('./routes/studentRoutes');
 const mealRoutes = require('./routes/mealRoutes');
 const reportRoutes = require('./routes/reportRoutes');
@@ -51,8 +50,7 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// 3. Modulos de Rotas da API
-app.use('/api/auth', authRoutes);
+// 3. Modulos de Rotas da API (Autenticação realizada diretamente via Supabase Auth Client-side)
 app.use('/api/students', studentRoutes);
 app.use('/api/meals', mealRoutes);
 app.use('/api/reports', reportRoutes);
