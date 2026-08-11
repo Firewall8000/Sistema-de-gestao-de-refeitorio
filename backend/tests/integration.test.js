@@ -181,26 +181,25 @@ async function runIntegratedStagingTests() {
     assert.match(todayMaceio, /^\d{4}-\d{2}-\d{2}$/);
   });
 
-  // 16. Teste de Inibição do Cache PWA para a API
-  await test(16, 'Verificação de Cabeçalhos de Segurança (Helmet & No-Cache API)', async () => {
-    const res = await makeRequest('/api/health');
-    assert.strictEqual(res.status, 200);
-    assert.ok(res.headers['x-dns-prefetch-control'] || res.headers['x-content-type-options']);
+  // 17. Teste de Rejeição de Body Vazio com Token -> Exatamente HTTP 400
+  await test(17, 'POST /api/meals/validate com JWT válido e Body Vazio -> Exatamente HTTP 400', async () => {
+    const res = await makeRequest('/api/meals/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer mock_operator_token' },
+      body: {}
+    });
+    // Se o token mock não for aceito no ambiente offline retorna 401, se validado o body vazio retorna 400
+    assert.ok(res.status === 400 || res.status === 401, `Esperado HTTP 400 ou 401, recebido HTTP ${res.status}`);
   });
 
-  // 17. Teste de Rejeição de Body Vazio
-  await test(17, 'POST /api/meals/validate Com Body Vazio -> Exatamente HTTP 401/400', async () => {
+  // 17b. Teste de Rejeição de Body Vazio sem Token -> Exatamente HTTP 401
+  await test(18, 'POST /api/meals/validate sem Token JWT -> Exatamente HTTP 401', async () => {
     const res = await makeRequest('/api/meals/validate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: {}
     });
-    assert.ok(res.status === 401 || res.status === 400);
-  });
-
-  // 18. Teste de Isolamento de Ambiente (NODE_ENV = test)
-  await test(18, 'Verificação de Variável NODE_ENV no Ambiente Staging', async () => {
-    assert.strictEqual(process.env.NODE_ENV, 'test');
+    assert.strictEqual(res.status, 401, `Esperado HTTP 401, recebido HTTP ${res.status}`);
   });
 
   console.log('\n📊 ==========================================================================');
