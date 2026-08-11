@@ -59,12 +59,12 @@ async function requireAuth(req, res, next) {
       console.warn('⚠️ Erro ao consultar user_roles no middleware:', e.message);
     }
 
-    // Se o usuário não possui linha cadastrada na tabela user_roles, o acesso é negado (retorna null, nunca assume OPERATOR)
+    // Se o usuário não possui linha cadastrada na tabela user_roles, o acesso é negado (retorna 403 FORBIDDEN, nunca assume OPERATOR)
     if (!userRole || !['ADMIN', 'OPERATOR'].includes(userRole)) {
-      return res.status(401).json({
+      return res.status(403).json({
         success: false,
-        error: 'UNAUTHORIZED_NO_ROLE',
-        message: 'Usuário autenticado, mas sem perfil de acesso (ADMIN/OPERATOR) atribuído no sistema.'
+        error: 'NO_ASSIGNED_ROLE',
+        message: 'Usuário autenticado, mas nenhum perfil de acesso (ADMIN/OPERATOR) foi atribuído a esta conta.'
       });
     }
 
