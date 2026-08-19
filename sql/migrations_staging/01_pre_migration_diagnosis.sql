@@ -1,21 +1,29 @@
--- ============================================================================
--- SANTOS DUMONT - STAGING MIGRATION 01: PRE-MIGRATION DIAGNOSIS VIEW
--- ============================================================================
-
 CREATE SCHEMA IF NOT EXISTS private;
 
--- View protegida para relatar duplicidades existentes antes da aplicação de restrições
+REVOKE ALL ON SCHEMA private FROM PUBLIC;
+REVOKE ALL ON SCHEMA private FROM anon, authenticated;
+GRANT USAGE ON SCHEMA private TO service_role;
+
+-- View protegida para relatar duplicidades antes das constraints
 CREATE OR REPLACE VIEW private.view_duplicate_meals_report AS
-SELECT 
+SELECT
     student_registration,
     student_name,
     date,
-    COUNT(*) AS total_refeicoes_duplicadas,
+    COUNT(*) AS total_refeicoes_registradas,
     ARRAY_AGG(id ORDER BY timestamp ASC) AS ids_refeicoes,
     ARRAY_AGG(timestamp ORDER BY timestamp ASC) AS horarios
 FROM public.meal_logs
-GROUP BY student_registration, student_name, date
+GROUP BY
+    student_registration,
+    student_name,
+    date
 HAVING COUNT(*) > 1;
 
-REVOKE ALL ON TABLE private.view_duplicate_meals_report FROM PUBLIC, anon, authenticated;
-GRANT SELECT ON TABLE private.view_duplicate_meals_report TO service_role;
+REVOKE ALL
+ON TABLE private.view_duplicate_meals_report
+FROM PUBLIC, anon, authenticated;
+
+GRANT SELECT
+ON TABLE private.view_duplicate_meals_report
+TO service_role;

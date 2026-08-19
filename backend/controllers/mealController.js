@@ -40,6 +40,7 @@ async function validateMeal(req, res, next) {
       p_identifier: cleanIdentifier,
       p_method: method,
       p_idempotency_key: validIdempotencyKey,
+      p_performed_by: req.user.id,
       p_is_offline_sync: isOfflineSyncHeader
     });
 

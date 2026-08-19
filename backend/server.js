@@ -1,6 +1,6 @@
 /* ==========================================================================
    SANTOS DUMONT - REFECTORY QR SYSTEM API
-   Main Express Server Entry Point (Render Web Service Environment)
+   Main Express Server Entry Point
    ========================================================================== */
 
 const express = require('express');
@@ -18,56 +18,130 @@ const reportRoutes = require('./routes/reportRoutes');
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-// 1. Configurações de Segurança e Cors
+/*
+ * O Render encaminha as requisições através de um proxy.
+ * Esta configuração permite que o rate limiter identifique o IP correto.
+ */
+app.set('trust proxy', 1);
+
+/*
+ * Segurança básica dos cabeçalhos HTTP.
+ */
 app.use(helmet());
 
-const allowedOrigins = (process.env.CORS_ORIGIN || '*')
+/*
+ * Origens autorizadas, separadas por vírgula.
+ *
+ * Exemplo:
+ * CORS_ORIGINS=http://localhost:3000,https://preview.vercel.app
+ */
+const allowedOrigins = (process.env.CORS_ORIGINS || '')
   .split(',')
-  .map(o => o.trim());
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
-app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+if (allowedOrigins.length === 0) {
+  throw new Error(
+    'CORS_ORIGINS não foi configurada. O servidor não será iniciado.'
+  );
+}
+
+const corsOptions = {
+  origin(origin, callback) {
+    /*
+     * Requisições sem Origin incluem health checks,
+     * ferramentas de servidor e alguns testes locais.
+     */
+    if (!origin) {
       return callback(null, true);
     }
-    return callback(new Error('Origem não permitida pela política CORS.'));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Offline-Sync', 'X-Requested-With']
-}));
 
-app.use(express.json());
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    const corsError = new Error(
+      'Origem não permitida pela política CORS.'
+    );
+
+    corsError.status = 403;
+    corsError.code = 'CORS_ORIGIN_DENIED';
+
+    return callback(corsError);
+  },
+
+  credentials: false,
+
+  methods: [
+    'GET',
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE',
+    'OPTIONS'
+  ],
+
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With'
+  ],
+
+  optionsSuccessStatus: 204
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
+
+/*
+ * Limita o tamanho do JSON para evitar requisições excessivas.
+ */
+app.use(express.json({ limit: '100kb' }));
+
 app.use(apiRateLimiter);
 
-// 2. Rota de Health-Check Pública (Para Uptime do Render)
+/*
+ * Rota pública para o health check do Render.
+ */
 app.get('/api/health', (req, res) => {
   return res.status(200).json({
     status: 'UP',
     service: 'Santos Dumont Refectory API',
+    environment: process.env.NODE_ENV || 'unknown',
     timestamp: new Date().toISOString(),
-    uptime: process.uptime()
+    uptime: Math.floor(process.uptime())
   });
 });
 
-// 3. Modulos de Rotas da API (Autenticação realizada diretamente via Supabase Auth Client-side)
+/*
+ * Rotas da API.
+ */
 app.use('/api/students', studentRoutes);
 app.use('/api/meals', mealRoutes);
 app.use('/api/reports', reportRoutes);
 
-// 4. Middleware Global para Tratar Rotas Não Encontradas (404)
+/*
+ * Rota não encontrada.
+ */
 app.use((req, res) => {
   return res.status(404).json({
     success: false,
     error: 'NOT_FOUND',
-    message: `A rota ${req.method} ${req.originalUrl} não foi encontrada na API.`
+    message:
+      `A rota ${req.method} ${req.originalUrl} não foi encontrada.`
   });
 });
 
-// 5. Tratador Global de Erros da API
+/*
+ * Tratamento global de erros.
+ */
 app.use(globalErrorHandler);
 
-// 6. Iniciar Servidor escutando em 0.0.0.0 e PORT
+/*
+ * Inicialização do servidor.
+ */
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 API Santos Dumont rodando na porta ${PORT} [0.0.0.0]`);
+  console.log(
+    `API Santos Dumont iniciada na porta ${PORT} [0.0.0.0]`
+  );
 });

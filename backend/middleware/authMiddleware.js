@@ -1,26 +1,32 @@
 /* ==========================================================================
    SANTOS DUMONT - REFECTORY QR SYSTEM API
-   Strict JWT Validation & RBAC Middleware (Supabase Auth Integration)
+   Strict JWT Validation & RBAC Middleware
    ========================================================================== */
 
 const { getAdminSupabase } = require('../config/supabase');
 
 /**
- * Middleware para validar o token JWT enviado no cabeçalho Authorization: Bearer <token>.
- * Valida a sessão diretamente com o Supabase Auth e consulta a role na tabela user_roles.
+ * Valida o token JWT enviado como:
+ * Authorization: Bearer <token>
  */
 async function requireAuth(req, res, next) {
   try {
     const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+
+    if (
+      !authHeader ||
+      !authHeader.startsWith('Bearer ')
+    ) {
       return res.status(401).json({
         success: false,
         error: 'UNAUTHORIZED',
-        message: 'Cabeçalho de autorização ausente ou malformatado.'
+        message:
+          'Cabeçalho de autorização ausente ou malformatado.'
       });
     }
 
     const token = authHeader.substring(7).trim();
+
     if (!token) {
       return res.status(401).json({
         success: false,
@@ -31,9 +37,10 @@ async function requireAuth(req, res, next) {
 
     const adminSupabase = getAdminSupabase();
 
-    // 1. Validar Token com o Supabase Auth Oficial
-    const { data: authData, error: authError } = await adminSupabase.auth.getUser(token);
-    if (authError || !authData.user) {
+    const { data: authData, error: authError } =
+      await adminSupabase.auth.getUser(token);
+
+    if (authError || !authData?.user) {
       return res.status(401).json({
         success: false,
         error: 'UNAUTHORIZED',
@@ -43,63 +50,82 @@ async function requireAuth(req, res, next) {
 
     const user = authData.user;
 
-    // 2. Consultar Role Oficial na Tabela Protegida user_roles
-    let userRole = null;
-    try {
-      const { data: roleData, error: roleError } = await adminSupabase
+    const { data: roleData, error: roleError } =
+      await adminSupabase
         .from('user_roles')
         .select('role')
         .eq('user_id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (!roleError && roleData) {
-        userRole = roleData.role;
-      }
-    } catch (e) {
-      console.warn('⚠️ Erro ao consultar user_roles no middleware:', e.message);
-    }
+    if (roleError) {
+      console.error(
+        'Erro ao consultar user_roles:',
+        roleError.code || 'UNKNOWN_ROLE_ERROR'
+      );
 
-    // Se o usuário não possui linha cadastrada na tabela user_roles, o acesso é negado (retorna 403 FORBIDDEN, nunca assume OPERATOR)
-    if (!userRole || !['ADMIN', 'OPERATOR'].includes(userRole)) {
-      return res.status(403).json({
+      return res.status(500).json({
         success: false,
-        error: 'NO_ASSIGNED_ROLE',
-        message: 'Usuário autenticado, mas nenhum perfil de acesso (ADMIN/OPERATOR) foi atribuído a esta conta.'
+        error: 'ROLE_LOOKUP_ERROR',
+        message: 'Não foi possível verificar o perfil do usuário.'
       });
     }
 
-    // Injetar contexto validado da requisição
+    const userRole = roleData?.role || null;
+
+    if (
+      !userRole ||
+      !['ADMIN', 'OPERATOR'].includes(userRole)
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: 'NO_ASSIGNED_ROLE',
+        message:
+          'Usuário autenticado sem perfil de acesso autorizado.'
+      });
+    }
+
     req.user = {
       id: user.id,
       email: user.email,
       role: userRole
     };
+
     req.token = token;
 
-    next();
-  } catch (err) {
-    console.error('❌ Erro de processamento no authMiddleware:', err);
+    return next();
+  } catch (error) {
+    console.error(
+      'Erro de processamento no authMiddleware:',
+      error
+    );
+
     return res.status(500).json({
       success: false,
       error: 'SERVER_ERROR',
-      message: 'Falha interna ao validar credenciais.'
+      message: 'Falha interna ao validar as credenciais.'
     });
   }
 }
 
 /**
- * Middleware para exigir roles específicas em rotas administrativas (ex: ['ADMIN']).
+ * Restringe a rota às funções informadas.
+ * Exemplo: requireRole(['ADMIN'])
  */
 function requireRole(allowedRoles = []) {
   return (req, res, next) => {
-    if (!req.user || !allowedRoles.includes(req.user.role)) {
+    if (
+      !req.user ||
+      !allowedRoles.includes(req.user.role)
+    ) {
       return res.status(403).json({
         success: false,
         error: 'FORBIDDEN',
-        message: `Acesso negado. Ação restrita a usuários com perfil: ${allowedRoles.join(', ')}.`
+        message:
+          `Acesso restrito aos perfis: ${allowedRoles.join(', ')}.`
       });
     }
-    next();
+
+    return next();
   };
 }
 

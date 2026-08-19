@@ -1,108 +1,160 @@
--- ============================================================================
--- SANTOS DUMONT - STAGING MIGRATION 02: SCHEMA, ROLES & AUDIT LOGS
--- ============================================================================
-
--- 1. Garantir Extensão Criptográfica no Schema 'extensions'
+CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 
--- 2. Tabela Protegida de Roles do Usuário
 CREATE TABLE IF NOT EXISTS public.user_roles (
-    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE PRIMARY KEY,
-    role VARCHAR(20) NOT NULL CHECK (role IN ('ADMIN', 'OPERATOR')),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    user_id UUID PRIMARY KEY
+        REFERENCES auth.users(id) ON DELETE CASCADE,
+    role VARCHAR(20) NOT NULL
+        CHECK (role IN ('ADMIN', 'OPERATOR')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT pg_catalog.now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT pg_catalog.now()
 );
 
 ALTER TABLE public.user_roles ENABLE ROW LEVEL SECURITY;
 
--- Helper Privado no Schema 'private' (Sem Fallback Nulo)
+DROP POLICY IF EXISTS "Leitura da propria role"
+ON public.user_roles;
+
+CREATE POLICY "Leitura da propria role"
+ON public.user_roles
+FOR SELECT
+TO authenticated
+USING ((SELECT auth.uid()) = user_id);
+
+REVOKE ALL ON TABLE public.user_roles
+FROM PUBLIC, anon, authenticated;
+
+GRANT SELECT ON TABLE public.user_roles
+TO authenticated;
+
+GRANT ALL ON TABLE public.user_roles
+TO service_role;
+
 CREATE OR REPLACE FUNCTION private.get_user_role(p_user_id UUID)
-RETURNS VARCHAR AS $$
+RETURNS VARCHAR
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
 DECLARE
     v_role VARCHAR(20);
 BEGIN
-    IF p_user_id IS NULL OR (p_user_id != auth.uid() AND auth.role() != 'service_role') THEN
+    IF p_user_id IS NULL THEN
         RETURN NULL;
     END IF;
 
-    SELECT ur.role INTO v_role 
-    FROM public.user_roles ur 
+    IF auth.role() <> 'service_role' THEN
+        RETURN NULL;
+    END IF;
+
+    SELECT ur.role
+    INTO v_role
+    FROM public.user_roles AS ur
     WHERE ur.user_id = p_user_id;
 
     RETURN v_role;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
+$$;
 
-REVOKE EXECUTE ON FUNCTION private.get_user_role(UUID) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION private.get_user_role(UUID) TO service_role;
+REVOKE ALL
+ON FUNCTION private.get_user_role(UUID)
+FROM PUBLIC, anon, authenticated;
 
--- Política RLS Sem Recursão Infinita
-DROP POLICY IF EXISTS "Leitura Segura de Roles" ON public.user_roles;
-CREATE POLICY "Leitura Segura de Roles" ON public.user_roles
-    FOR SELECT USING (
-        auth.uid() = user_id 
-        OR private.get_user_role(auth.uid()) = 'ADMIN'
-    );
+GRANT EXECUTE
+ON FUNCTION private.get_user_role(UUID)
+TO service_role;
 
--- 3. Atualizar Tabela Students com Soft Delete e SHA-256 Token Hash
-ALTER TABLE public.students 
+ALTER TABLE public.students
 ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ DEFAULT NULL,
-ADD COLUMN IF NOT EXISTS deleted_by UUID DEFAULT NULL,
-ADD COLUMN IF NOT EXISTS qr_token_hash VARCHAR(64) UNIQUE DEFAULT NULL;
+ADD COLUMN IF NOT EXISTS deleted_by UUID DEFAULT NULL
+    REFERENCES auth.users(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS qr_token_hash VARCHAR(64) DEFAULT NULL;
 
--- Migrar Tokens QR Existentes calculando o Hash SHA-256
-UPDATE public.students
-SET qr_token_hash = pg_catalog.encode(extensions.digest(qr_token::bytea, 'sha256'::text), 'hex')
-WHERE qr_token IS NOT NULL AND qr_token_hash IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS students_qr_token_hash_unique
+ON public.students (qr_token_hash)
+WHERE qr_token_hash IS NOT NULL;
 
--- 4. Tabela de Auditoria Imutável
 CREATE TABLE IF NOT EXISTS public.audit_logs (
     id UUID PRIMARY KEY DEFAULT extensions.gen_random_uuid(),
     table_name VARCHAR(50) NOT NULL,
-    action VARCHAR(30) NOT NULL,
+    action VARCHAR(50) NOT NULL,
     record_id VARCHAR(100) NOT NULL,
-    performed_by UUID,
+    performed_by UUID
+        REFERENCES auth.users(id) ON DELETE SET NULL,
     payload JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT pg_catalog.now()
 );
 
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 
 CREATE OR REPLACE FUNCTION private.prevent_audit_modification()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
 BEGIN
-    RAISE EXCEPTION 'Registros de audit_logs são imutáveis e não podem ser alterados ou excluídos.' USING ERRCODE = '42501';
+    RAISE EXCEPTION
+        'Registros de auditoria são imutáveis.'
+        USING ERRCODE = '42501';
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = '';
+$$;
 
-DROP TRIGGER IF EXISTS trg_prevent_audit_mod ON public.audit_logs;
+REVOKE ALL
+ON FUNCTION private.prevent_audit_modification()
+FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trg_prevent_audit_mod
+ON public.audit_logs;
+
 CREATE TRIGGER trg_prevent_audit_mod
-BEFORE UPDATE OR DELETE ON public.audit_logs
-FOR EACH ROW EXECUTE FUNCTION private.prevent_audit_modification();
+BEFORE UPDATE OR DELETE
+ON public.audit_logs
+FOR EACH ROW
+EXECUTE FUNCTION private.prevent_audit_modification();
 
-REVOKE UPDATE, DELETE, TRUNCATE ON public.audit_logs FROM PUBLIC, authenticated, anon;
-GRANT SELECT, INSERT ON public.audit_logs TO authenticated, service_role;
+REVOKE ALL ON TABLE public.audit_logs
+FROM PUBLIC, anon, authenticated;
 
--- 5. Atualizar Tabela meal_logs e Constraints Nomeadas Explicitamente
-ALTER TABLE public.meal_logs 
+REVOKE UPDATE, DELETE, TRUNCATE
+ON TABLE public.audit_logs
+FROM service_role;
+
+GRANT SELECT, INSERT
+ON TABLE public.audit_logs
+TO service_role;
+
+ALTER TABLE public.meal_logs
 ADD COLUMN IF NOT EXISTS meal_date DATE,
 ADD COLUMN IF NOT EXISTS qr_token_hash_used VARCHAR(64),
-ADD COLUMN IF NOT EXISTS idempotency_key UUID DEFAULT NULL;
+ADD COLUMN IF NOT EXISTS idempotency_key UUID;
 
-UPDATE public.meal_logs SET meal_date = date WHERE meal_date IS NULL;
-UPDATE public.meal_logs SET idempotency_key = extensions.gen_random_uuid() WHERE idempotency_key IS NULL;
+UPDATE public.meal_logs
+SET meal_date = date
+WHERE meal_date IS NULL;
 
-ALTER TABLE public.meal_logs ALTER COLUMN meal_date SET NOT NULL;
+UPDATE public.meal_logs
+SET idempotency_key = extensions.gen_random_uuid()
+WHERE idempotency_key IS NULL;
 
--- Aplicar Constraints Nomeadas
-ALTER TABLE public.meal_logs 
+ALTER TABLE public.meal_logs
+ALTER COLUMN student_id SET NOT NULL,
+ALTER COLUMN meal_date SET NOT NULL,
+ALTER COLUMN idempotency_key SET NOT NULL;
+
+ALTER TABLE public.meal_logs
 DROP CONSTRAINT IF EXISTS unique_meal_idempotency;
 
-ALTER TABLE public.meal_logs 
-ADD CONSTRAINT unique_meal_idempotency UNIQUE (idempotency_key);
+ALTER TABLE public.meal_logs
+ADD CONSTRAINT unique_meal_idempotency
+UNIQUE (idempotency_key);
 
-ALTER TABLE public.meal_logs 
+ALTER TABLE public.meal_logs
 DROP CONSTRAINT IF EXISTS unique_student_meal_per_day;
 
-ALTER TABLE public.meal_logs 
-ADD CONSTRAINT unique_student_meal_per_day UNIQUE (meal_date, student_id);
+ALTER TABLE public.meal_logs
+ADD CONSTRAINT unique_student_meal_per_day
+UNIQUE (meal_date, student_id);
+
+GRANT ALL ON TABLE public.students TO service_role;
+GRANT ALL ON TABLE public.meal_logs TO service_role;

@@ -3,37 +3,72 @@
    Rate Limiting Protection Middleware
    ========================================================================== */
 
-const rateLimit = require('express-rate-limit');
+const {
+  rateLimit,
+  ipKeyGenerator
+} = require('express-rate-limit');
 
-/**
- * Limitador global para prevenção de abuso e ataques de negação de serviço.
- * Permite até 200 requisições a cada 15 minutos por IP.
+/*
+ * Resposta padronizada para limite excedido.
+ */
+function rateLimitHandler(req, res) {
+  return res.status(429).json({
+    success: false,
+    error: 'RATE_LIMIT_EXCEEDED',
+    message:
+      'Muitas requisições foram realizadas. Aguarde um momento e tente novamente.'
+  });
+}
+
+/*
+ * Limite global da API.
+ *
+ * O valor considera que vários dispositivos da escola podem
+ * compartilhar o mesmo endereço IP através do Wi-Fi.
  */
 const apiRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
+  limit: 1000,
+  standardHeaders: 'draft-7',
   legacyHeaders: false,
-  message: {
-    success: false,
-    error: 'TOO_MANY_REQUESTS',
-    message: 'Muitas requisições originadas deste IP. Por favor, aguarde alguns minutos.'
-  }
+
+  /*
+   * Health checks automáticos do Render não consomem o limite.
+   */
+  skip(req) {
+    return req.path === '/api/health';
+  },
+
+  handler: rateLimitHandler
 });
 
-/**
- * Limitador estrito para operações sensíveis (ex: validação de refeição / QR).
- * Permite até 60 requisições por minuto por IP.
+/*
+ * Limite específico para o scanner.
+ *
+ * mealRoutes executa requireAuth antes deste middleware,
+ * portanto req.user.id já estará validado.
  */
 const strictRateLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000,
-  max: 60,
-  standardHeaders: true,
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: 'draft-7',
   legacyHeaders: false,
-  message: {
-    success: false,
-    error: 'TOO_MANY_REQUESTS',
-    message: 'Limite de requisições por minuto atingido para o leitor de QR Code.'
+
+  keyGenerator(req) {
+  if (req.user?.id) {
+    return `user:${req.user.id}`;
+  }
+
+  return `ip:${ipKeyGenerator(req.ip)}`;
+},
+
+  handler(req, res) {
+    return res.status(429).json({
+      success: false,
+      error: 'RATE_LIMIT_EXCEEDED',
+      message:
+        'Limite temporário de leituras atingido. Aguarde alguns segundos.'
+    });
   }
 });
 
