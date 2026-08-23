@@ -9,7 +9,20 @@ const path = require('path');
 const projectRoot = path.join(__dirname, '..');
 const outputDirectory = path.join(projectRoot, 'public');
 
+/*
+ * Variáveis fornecidas exclusivamente pelo ambiente de Preview da Vercel.
+ *
+ * IMPORTANTE:
+ * SUPABASE_SERVICE_ROLE_KEY NÃO DEVE existir aqui.
+ */
+
 const renderApiUrl = process.env.RENDER_API_URL;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+/* ==========================================================================
+   VALIDAÇÃO DAS VARIÁVEIS
+   ========================================================================== */
 
 if (!renderApiUrl || !renderApiUrl.trim()) {
   console.error(
@@ -18,12 +31,31 @@ if (!renderApiUrl || !renderApiUrl.trim()) {
   process.exit(1);
 }
 
-const cleanUrl = renderApiUrl.trim();
+if (!supabaseUrl || !supabaseUrl.trim()) {
+  console.error(
+    '\nBUILD FAILED: A variável SUPABASE_URL é obrigatória.'
+  );
+  process.exit(1);
+}
+
+if (!supabaseAnonKey || !supabaseAnonKey.trim()) {
+  console.error(
+    '\nBUILD FAILED: A variável SUPABASE_ANON_KEY é obrigatória.'
+  );
+  process.exit(1);
+}
+
+/* ==========================================================================
+   VALIDAÇÃO DAS URLS
+   ========================================================================== */
+
+const cleanRenderApiUrl = renderApiUrl.trim();
+const cleanSupabaseUrl = supabaseUrl.trim();
 
 try {
-  const parsedUrl = new URL(cleanUrl);
+  const parsedRenderUrl = new URL(cleanRenderApiUrl);
 
-  if (parsedUrl.protocol !== 'https:') {
+  if (parsedRenderUrl.protocol !== 'https:') {
     throw new Error();
   }
 } catch {
@@ -32,6 +64,23 @@ try {
   );
   process.exit(1);
 }
+
+try {
+  const parsedSupabaseUrl = new URL(cleanSupabaseUrl);
+
+  if (parsedSupabaseUrl.protocol !== 'https:') {
+    throw new Error();
+  }
+} catch {
+  console.error(
+    '\nBUILD FAILED: SUPABASE_URL deve ser uma URL HTTPS válida.'
+  );
+  process.exit(1);
+}
+
+/* ==========================================================================
+   ARQUIVOS E DIRETÓRIOS DO FRONTEND
+   ========================================================================== */
 
 const frontendDirectories = [
   'assets',
@@ -45,37 +94,9 @@ const frontendFiles = [
   'sw.js'
 ];
 
-function copyDirectory(source, destination) {
-  fs.mkdirSync(destination, {
-    recursive: true
-  });
-
-  const entries = fs.readdirSync(source, {
-    withFileTypes: true
-  });
-
-  for (const entry of entries) {
-    const sourcePath = path.join(source, entry.name);
-    const destinationPath = path.join(
-      destination,
-      entry.name
-    );
-
-    if (entry.isDirectory()) {
-      copyDirectory(sourcePath, destinationPath);
-      continue;
-    }
-
-    if (entry.isFile()) {
-      fs.copyFileSync(sourcePath, destinationPath);
-      continue;
-    }
-
-    throw new Error(
-      `Tipo de arquivo não suportado: ${sourcePath}`
-    );
-  }
-}
+/* ==========================================================================
+   BUILD
+   ========================================================================== */
 
 try {
   /*
@@ -93,21 +114,42 @@ try {
   /*
    * Copia somente as pastas públicas do frontend.
    */
-  for (const directory of frontendDirectories) {
-    const source = path.join(projectRoot, directory);
-    const destination = path.join(
-      outputDirectory,
-      directory
+  function copyDirectory(source, destination) {
+  if (!fs.existsSync(source)) {
+    throw new Error(
+      `Diretório obrigatório não encontrado: ${source}`
     );
-
-    if (!fs.existsSync(source)) {
-      throw new Error(
-        `Diretório obrigatório não encontrado: ${directory}`
-      );
-    }
-
-    copyDirectory(source, destination);
   }
+
+  fs.mkdirSync(destination, {
+    recursive: true
+  });
+
+  const entries = fs.readdirSync(source, {
+    withFileTypes: true
+  });
+
+  for (const entry of entries) {
+    const sourcePath = path.join(source, entry.name);
+    const destinationPath = path.join(destination, entry.name);
+
+    if (entry.isDirectory()) {
+      copyDirectory(sourcePath, destinationPath);
+    } else if (entry.isFile()) {
+      fs.copyFileSync(sourcePath, destinationPath);
+    }
+  }
+}
+
+for (const directory of frontendDirectories) {
+  const source = path.join(projectRoot, directory);
+  const destination = path.join(
+    outputDirectory,
+    directory
+  );
+
+  copyDirectory(source, destination);
+}
 
   /*
    * Copia somente os arquivos públicos necessários.
@@ -128,10 +170,10 @@ try {
     fs.copyFileSync(source, destination);
   }
 
-  /*
-   * Sobrescreve a configuração copiada com o endereço
-   * fornecido exclusivamente pelo ambiente de Preview.
-   */
+  /* ==========================================================================
+     RUNTIME CONFIG
+     ========================================================================== */
+
   const runtimeConfigPath = path.join(
     outputDirectory,
     'js',
@@ -141,9 +183,16 @@ try {
   const runtimeConfigContent = `/* ==========================================================================
    SANTOS DUMONT - REFECTORY QR SYSTEM
    Generated Runtime Configuration
+   DO NOT EDIT MANUALLY
    ========================================================================== */
 
-window.RENDER_API_URL = ${JSON.stringify(cleanUrl)};
+window.RENDER_API_URL = ${JSON.stringify(cleanRenderApiUrl)};
+
+window.SUPABASE_URL = ${JSON.stringify(cleanSupabaseUrl)};
+
+window.SUPABASE_ANON_KEY = ${JSON.stringify(
+    supabaseAnonKey.trim()
+  )};
 `;
 
   fs.writeFileSync(
@@ -155,12 +204,26 @@ window.RENDER_API_URL = ${JSON.stringify(cleanUrl)};
   console.log(
     'Build concluído: frontend copiado com segurança para public/.'
   );
+
   console.log(
     'Runtime config gerada em public/js/runtime-config.js.'
   );
+
+  /*
+   * Por segurança, não imprimimos nenhuma chave no terminal.
+   */
+  console.log(
+    'Configuração do Render API: OK.'
+  );
+
+  console.log(
+    'Configuração do Supabase: OK.'
+  );
+
 } catch (error) {
   console.error(
     `BUILD FAILED: ${error.message}`
   );
+
   process.exit(1);
 }

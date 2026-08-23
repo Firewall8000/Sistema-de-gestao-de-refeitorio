@@ -4,22 +4,53 @@
    ========================================================================== */
 
 const SUPABASE_CONFIG = {
-  url: 'https://bxbouiubbyakwostjypu.supabase.co',
-  anonKey: 'sb_publishable_p5IE2xVpmL2Vdr2y2etCnA_FI7tyDtI'
+  url: window.SUPABASE_URL || '',
+  anonKey: window.SUPABASE_ANON_KEY || ''
 };
 
-// Initialize Supabase Client globally if SDK is loaded
 let supabaseClient = null;
 
-if (window.supabase && typeof window.supabase.createClient === 'function') {
+const hasValidSupabaseConfig =
+  typeof SUPABASE_CONFIG.url === 'string' &&
+  SUPABASE_CONFIG.url.startsWith('https://') &&
+  typeof SUPABASE_CONFIG.anonKey === 'string' &&
+  SUPABASE_CONFIG.anonKey.trim() !== '';
+
+if (!hasValidSupabaseConfig) {
+  console.error(
+    'Configuração do Supabase ausente ou inválida. ' +
+    'Verifique SUPABASE_URL e SUPABASE_ANON_KEY.'
+  );
+} else if (
+  window.supabase &&
+  typeof window.supabase.createClient === 'function'
+) {
   try {
-    supabaseClient = window.supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
-    console.log('⚡ Supabase Client conectado com sucesso à nuvem:', SUPABASE_CONFIG.url);
-  } catch (err) {
-    console.warn('⚠️ Falha ao conectar Supabase Client:', err);
+    supabaseClient = window.supabase.createClient(
+      SUPABASE_CONFIG.url,
+      SUPABASE_CONFIG.anonKey,
+      {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true
+        }
+      }
+    );
+
+    console.log(
+      'Supabase Client inicializado com a configuração do ambiente.'
+    );
+  } catch (error) {
+    console.error(
+      'Falha ao inicializar o Supabase Client:',
+      error
+    );
   }
 } else {
-  console.warn('⚠️ Supabase JS SDK ainda não carregado. Operando em fallback local.');
+  console.error(
+    'Supabase JS SDK não foi carregado.'
+  );
 }
 
 window.SUPABASE_CONFIG = SUPABASE_CONFIG;
