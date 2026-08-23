@@ -1,6 +1,7 @@
 {
   "version": 2,
   "name": "santos-dumont-refectory-qr",
+  "outputDirectory": "public",
   "cleanUrls": true,
   "headers": [
     {
