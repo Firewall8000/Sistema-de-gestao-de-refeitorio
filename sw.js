@@ -1,10 +1,11 @@
 /* ==========================================================================
    SANTOS DUMONT - REFECTORY QR SYSTEM
-   Service Worker (Network-First for Config/HTML & Purge `cesd-refectory-*`)
+   Service Worker (Total Network-First for App Assets & Clean Cache)
    ========================================================================== */
 
 const CACHE_PREFIX = 'cesd-refectory-';
-const CACHE_NAME = `${CACHE_PREFIX}v3.2.0`;
+// 1. Mudamos a versão para v3.3.0 para forçar o navegador a descartar o v3.2.0 antigo
+const CACHE_NAME = `${CACHE_PREFIX}v3.3.0`;
 
 const ASSETS_TO_CACHE = [
   './',
@@ -29,7 +30,7 @@ const ASSETS_TO_CACHE = [
   './js/sync.js'
 ];
 
-// 1. Install Event - Skip waiting immediately
+// 1. Install Event - Ativa imediatamente sem esperar fechar abas
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
@@ -40,7 +41,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// 2. Activate Event - Purge ONLY old caches starting with cesd-refectory- or legacy santos-dumont-cache-
+// 2. Activate Event - Remove todos os caches anteriores (v3.2.0, legados, etc.)
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -56,41 +57,33 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// 3. Fetch Event - Never cache API, Supabase, Auth or WebSockets; Network-First for runtime-config and HTML
+// 3. Fetch Event - Network-First para a aplicação inteira
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
-  // IGNORAR E NUNCA ARMAZENAR NO CACHE DO SW: Chamadas de API Render, Supabase, Auth e Realtime
+  // Nunca intercepta nem faz cache de APIs, Supabase ou WebSockets
   if (url.includes('/api/') || url.includes('.supabase.co') || url.includes('wss://')) {
-    return; // Deixa o navegador fazer o fetch direto na rede sem interceptação
-  }
-
-  // Network-First para runtime-config.js e navegação HTML (evita preservar URL antiga)
-  if (url.includes('runtime-config.js') || event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
-        }
-        return networkResponse;
-      }).catch(() => caches.match(event.request))
-    );
     return;
   }
 
-  // Stale-While-Revalidate para demais ativos estáticos (CSS, JS, Imagens)
+  // Apenas requisições GET locais
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // Network-First: Tenta a rede primeiro para garantir código atualizado
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
+    fetch(event.request)
+      .then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, responseToCache));
         }
         return networkResponse;
-      }).catch(() => cachedResponse);
-
-      return cachedResponse || fetchPromise;
-    })
+      })
+      .catch(() => {
+        // Sem internet? Recorre ao cache local
+        return caches.match(event.request);
+      })
   );
 });
