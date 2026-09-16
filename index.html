@@ -65,9 +65,24 @@
     <!-- TAB 1: SCANNER & VALIDAÇÃO REFEITÓRIO -->
     <section id="tab-scanner" class="tab-content active">
       <div class="card">
-        <div class="card-header">
-          <h2 class="card-title">📷 Validação de Almoço em Tempo Real</h2>
-          <span class="badge badge-info" id="scanner-mode-badge">Leitor Ativo</span>
+        <div class="card-header" style="flex-wrap: wrap; gap: 1rem; align-items: center;">
+          <div>
+            <h2 class="card-title" id="scanner-title">📷 Validação de Almoço em Tempo Real</h2>
+            <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem;" id="scanner-subtitle">Aponte o QR Code para validar a entrega da merenda</p>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 0.75rem; margin-left: auto; flex-wrap: wrap;">
+            <!-- Mode Selector Pills -->
+            <div class="mode-selector-pills">
+              <button type="button" class="mode-pill-btn active" id="mode-pill-refeitorio" data-mode="refeitorio" title="Modo Refeitório: Valida e registra almoço">
+                🍽️ Refeitório (Almoço)
+              </button>
+              <button type="button" class="mode-pill-btn" id="mode-pill-portaria" data-mode="portaria" title="Modo Portaria: Registra entrada na escola">
+                🚪 Portaria (Entrada)
+              </button>
+            </div>
+            <span class="badge badge-info" id="scanner-mode-badge">Leitor Ativo</span>
+          </div>
         </div>
 
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
@@ -108,7 +123,7 @@
             </div>
 
             <div class="card" style="background: rgba(15, 23, 42, 0.5);">
-              <h3 style="font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text-muted);">📊 Almoços Registrados Hoje</h3>
+              <h3 style="font-size: 0.95rem; margin-bottom: 0.5rem; color: var(--text-muted);" id="counter-today-label">📊 Almoços Registrados Hoje</h3>
               <div style="font-size: 2.2rem; font-weight: 800; color: var(--color-success);" id="counter-today-meals">0</div>
               <p style="font-size: 0.8rem; color: var(--text-dim);">Registros efetuados na data corrente</p>
             </div>

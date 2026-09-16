@@ -98,6 +98,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Scanner Mode Pill Toggle Buttons (Portaria x Refeitório)
+  const pillRefeitorio = document.getElementById('mode-pill-refeitorio');
+  const pillPortaria = document.getElementById('mode-pill-portaria');
+
+  if (pillRefeitorio) {
+    pillRefeitorio.addEventListener('click', () => {
+      if (window.mealValidatorService) {
+        window.mealValidatorService.setScannerMode('refeitorio');
+      }
+    });
+  }
+
+  if (pillPortaria) {
+    pillPortaria.addEventListener('click', () => {
+      if (window.mealValidatorService) {
+        window.mealValidatorService.setScannerMode('portaria');
+      }
+    });
+  }
+
   // Student Search & Filter Events
   const searchInput = document.getElementById('search-student');
   const gradeFilter = document.getElementById('filter-grade');
@@ -369,7 +389,8 @@ function hideLoadingModal() {
 
 async function refreshAllUI() {
   if (window.mealValidatorService) {
-    await window.mealValidatorService.updateTodayCounterUI();
+    const currentMode = window.mealValidatorService.getScannerMode();
+    window.mealValidatorService.updateScannerUIForMode(currentMode);
   }
   renderStudentsTable();
 }

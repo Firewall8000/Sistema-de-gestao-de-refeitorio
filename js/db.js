@@ -4,7 +4,7 @@
    ========================================================================== */
 
 const DB_NAME = 'SantosDumontRefectoryDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 class RefectoryDatabase {
   constructor() {
@@ -42,6 +42,14 @@ class RefectoryDatabase {
         if (!db.objectStoreNames.contains('users')) {
           const userStore = db.createObjectStore('users', { keyPath: 'id' });
           userStore.createIndex('username', 'username', { unique: true });
+        }
+
+        // Store 4: School Entries (Portaria)
+        if (!db.objectStoreNames.contains('school_entries')) {
+          const entryStore = db.createObjectStore('school_entries', { keyPath: 'id' });
+          entryStore.createIndex('entry_date', 'entry_date', { unique: false });
+          entryStore.createIndex('student_id', 'student_id', { unique: false });
+          entryStore.createIndex('date_student', ['entry_date', 'student_id'], { unique: true });
         }
       };
 
