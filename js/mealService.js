@@ -523,15 +523,20 @@ class MealValidatorService {
    */
   async updateTodayCounterUI() {
     const counterEl = document.getElementById('counter-today-meals');
-    if (!counterEl) return;
+    if (counterEl) {
+      const mode = this.getScannerMode();
+      if (mode === 'portaria') {
+        const count = await this.getTodayEntriesCount();
+        counterEl.textContent = count;
+      } else {
+        const count = await this.getTodayMealsCount();
+        counterEl.textContent = count;
+      }
+    }
 
-    const mode = this.getScannerMode();
-    if (mode === 'portaria') {
-      const count = await this.getTodayEntriesCount();
-      counterEl.textContent = count;
-    } else {
-      const count = await this.getTodayMealsCount();
-      counterEl.textContent = count;
+    if (window.dashboardController) {
+      window.dashboardController.refreshTodayMetrics();
+      window.dashboardController.loadLunchQueueTable();
     }
   }
 }

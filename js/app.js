@@ -556,7 +556,9 @@ async function toggleStudentStatus(id) {
 
 async function refreshDashboardView() {
   if (window.dashboardController) {
+    window.dashboardController.initRealtimeSubscription();
     await window.dashboardController.refreshTodayMetrics();
+    await window.dashboardController.loadLunchQueueTable();
     const dateVal = document.getElementById('report-date')?.value;
     const statusVal = document.getElementById('report-filter-status')?.value;
     await window.dashboardController.loadReportTable(dateVal, statusVal);

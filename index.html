@@ -211,23 +211,60 @@
           <button id="btn-export-csv" class="btn btn-secondary btn-sm">📥 Exportar CSV</button>
         </div>
 
-        <!-- KPI Metric Cards -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <!-- KPI Metric Cards (5 Cards) -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
           <div class="card" style="border-left: 4px solid var(--color-primary);">
             <div style="color: var(--text-muted); font-size: 0.85rem;">Total de Alunos Ativos</div>
             <div style="font-size: 1.8rem; font-weight: 800; margin-top: 0.25rem;" id="dash-total-students">0</div>
           </div>
+          <div class="card" style="border-left: 4px solid var(--color-primary);">
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Presentes na Escola Hoje</div>
+            <div style="font-size: 1.8rem; font-weight: 800; color: var(--color-primary); margin-top: 0.25rem;" id="dash-present-today">0</div>
+          </div>
           <div class="card" style="border-left: 4px solid var(--color-success);">
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Almoçaram Hoje</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Almoçaram no Refeitório</div>
             <div style="font-size: 1.8rem; font-weight: 800; color: var(--color-success); margin-top: 0.25rem;" id="dash-served-today">0</div>
           </div>
-          <div class="card" style="border-left: 4px solid var(--color-warning);">
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Pendentes no Dia</div>
-            <div style="font-size: 1.8rem; font-weight: 800; color: var(--color-warning); margin-top: 0.25rem;" id="dash-pending-today">0</div>
+          <div class="card" style="border-left: 4px solid var(--color-danger);">
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Não Almoçaram (Comida Externa)</div>
+            <div style="font-size: 1.8rem; font-weight: 800; color: var(--color-danger); margin-top: 0.25rem;" id="dash-external-food">0</div>
           </div>
           <div class="card" style="border-left: 4px solid var(--color-info);">
             <div style="color: var(--text-muted); font-size: 0.85rem;">Taxa de Adesão</div>
             <div style="font-size: 1.8rem; font-weight: 800; color: var(--color-info); margin-top: 0.25rem;" id="dash-rate">0%</div>
+          </div>
+        </div>
+
+        <!-- Real-Time Lunch Queue Section -->
+        <div class="card" style="background: rgba(15, 23, 42, 0.5); margin-bottom: 1.5rem; border: 1px solid var(--border-color);">
+          <div class="card-header" style="margin-bottom: 0.75rem; padding-bottom: 0.5rem;">
+            <div>
+              <h3 class="card-title" style="font-size: 1.05rem; color: var(--color-warning);">🍽️ Fila do Almoço em Tempo Real (Ordem de Chegada na Portaria)</h3>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.2rem;">Alunos presentes na escola aguardando liberação de merenda</p>
+            </div>
+            <span class="badge badge-info" id="queue-live-badge">🟢 Ao Vivo (TV Refeitório)</span>
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width: 90px; text-align: center;">Posição</th>
+                  <th>Matrícula</th>
+                  <th>Nome do Aluno</th>
+                  <th>Série / Turma</th>
+                  <th>Horário de Chegada</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="lunch-queue-table-body">
+                <tr>
+                  <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                    Carregando fila em tempo real...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -244,6 +281,7 @@
               <option value="ALL">Todos os Alunos</option>
               <option value="SERVED">Apenas os que Almoçaram</option>
               <option value="PENDING">Apenas Ausentes/Pendentes</option>
+              <option value="PRESENT_NOT_SERVED">Presentes na Escola que NÃO Almoçaram (Comida Externa / iFood)</option>
             </select>
           </div>
         </div>
