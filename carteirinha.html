@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="description" content="Carteirinha Digital do Estudante — Centro de Excelência Santos Dumont">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Carteirinha SD">
+  <title>Carteirinha Digital — Santos Dumont</title>
+
+  <!-- Manifest & Favicon -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="assets/img/logo.png">
+  <link rel="apple-touch-icon" href="assets/img/logo.png">
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+
+  <style>
+    /* Carteirinha Mobile Spec Styling */
+    body {
+      background-color: #0f172a;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.12) 0px, transparent 50%);
+      background-attachment: fixed;
+    }
+
+    .carteirinha-container {
+      width: 100%;
+      max-width: 420px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+    }
+
+    /* PWA Banners */
+    .pwa-banner {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(6, 182, 212, 0.2));
+      border: 1px solid var(--color-primary);
+      border-radius: var(--radius-md);
+      padding: 0.85rem 1rem;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      box-shadow: 0 4px 15px rgba(59, 130, 246, 0.25);
+      animation: slideDown 0.4s ease;
+    }
+
+    .ios-banner {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 0.75rem 1rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-align: center;
+      display: none;
+      line-height: 1.4;
+    }
+
+    @keyframes slideDown {
+      from { transform: translateY(-15px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    /* Wallet Card Styling (Apple / Google Wallet style) */
+    .wallet-card {
+      background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 24px;
+      padding: 1.5rem;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      position: relative;
+      overflow: hidden;
+      backdrop-filter: blur(10px);
+      animation: fadeIn 0.4s ease;
+    }
+
+    .wallet-card::before {
+      content: '';
+      position: absolute;
+      top: -50%;
+      right: -50%;
+      width: 200%;
+      height: 200%;
+      background: radial-gradient(circle, rgba(59, 130, 246, 0.08) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    .card-header-gov {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px dashed rgba(255, 255, 255, 0.15);
+      padding-bottom: 1rem;
+      gap: 0.5rem;
+    }
+
+    .gov-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .gov-logo {
+      height: 48px;
+      width: auto;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.4));
+    }
+
+    .gov-text h2 {
+      font-size: 0.95rem;
+      color: #ffffff;
+      line-height: 1.1;
+    }
+
+    .gov-text p {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      letter-spacing: 0.02em;
+    }
+
+    .year-badge {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
+      color: #ffffff;
+      font-size: 0.7rem;
+      font-weight: 800;
+      padding: 0.35rem 0.65rem;
+      border-radius: var(--radius-full);
+      box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+      white-space: nowrap;
+    }
+
+    .student-info {
+      text-align: center;
+    }
+
+    .student-name {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #ffffff;
+      margin-bottom: 0.75rem;
+      line-height: 1.25;
+      text-transform: uppercase;
+      letter-spacing: -0.01em;
+    }
+
+    .student-details-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.75rem 1rem;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border-color);
+      margin-bottom: 1rem;
+      text-align: left;
+    }
+
+    .detail-item {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .detail-label {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
+    .detail-val {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+
+    .qr-container-box {
+      background: #ffffff;
+      padding: 14px;
+      border-radius: 18px;
+      display: inline-flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    }
+
+    #qrcode-box img, #qrcode-box canvas {
+      display: block;
+      margin: 0 auto;
+    }
+
+    .qr-subtext {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-align: center;
+      margin-top: 0.5rem;
+    }
+
+    .status-badge-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    /* Login Form Card */
+    .login-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 24px;
+      padding: 2rem 1.5rem;
+      box-shadow: var(--shadow-lg);
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      text-align: center;
+      animation: fadeIn 0.4s ease;
+    }
+
+    .login-logo {
+      height: 70px;
+      width: auto;
+      object-fit: contain;
+      margin: 0 auto 0.25rem;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="carteirinha-container">
+
+    <!-- PWA Installation Prompt Banner -->
+    <div id="pwa-banner" class="pwa-banner">
+      <div style="display: flex; align-items: center; gap: 0.6rem;">
+        <span style="font-size: 1.5rem;">📲</span>
+        <div>
+          <div style="font-size: 0.88rem; font-weight: 700; color: #ffffff;">Instalar Carteirinha</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">Adicione à tela inicial do celular</div>
+        </div>
+      </div>
+      <button id="btn-install-pwa" class="btn btn-primary btn-sm" style="white-space: nowrap;">Instalar</button>
+    </div>
+
+    <!-- iOS Installation Tip Banner -->
+    <div id="ios-tip-banner" class="ios-banner">
+      💡 <strong>No iPhone / iPad:</strong> Toque no botão de compartilhar <span style="font-size: 1.1rem;">📤</span> no Safari e selecione <strong>"Adicionar à Tela de Início"</strong>.
+    </div>
+
+    <!-- VIEW 1: LOGIN POR MATRÍCULA -->
+    <div id="view-login" class="login-card">
+      <div>
+        <img src="assets/img/logo.png" alt="Centro de Excelência Santos Dumont" class="login-logo">
+        <h1 style="font-size: 1.35rem; color: #ffffff; margin-top: 0.5rem;">Carteirinha Digital</h1>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem;">Centro de Excelência Santos Dumont</p>
+      </div>
+
+      <form id="form-student-login" style="display: flex; flex-direction: column; gap: 1rem; margin-top: 0.5rem;">
+        <div class="form-group" style="text-align: left; margin: 0;">
+          <label class="form-label" for="input-student-registration" style="font-size: 0.85rem;">Digite sua Matrícula</label>
+          <input 
+            type="text" 
+            id="input-student-registration" 
+            class="form-control" 
+            placeholder="Ex: 2026001" 
+            required
+            autocomplete="off"
+            style="font-size: 1.2rem; font-weight: 700; letter-spacing: 0.05em; text-align: center; padding: 0.85rem;"
+          >
+        </div>
+
+        <div id="login-error-msg" style="display: none; color: var(--color-danger); font-size: 0.85rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); padding: 0.75rem; border-radius: var(--radius-sm); line-height: 1.3;">
+        </div>
+
+        <button type="submit" id="btn-access-card" class="btn btn-primary btn-lg" style="width: 100%; margin-top: 0.25rem;">
+          🎫 Acessar Carteirinha
+        </button>
+      </form>
+      <p style="font-size: 0.75rem; color: var(--text-dim);">Governo de Sergipe • Secretaria de Estado da Educação</p>
+    </div>
+
+    <!-- VIEW 2: CARTEIRINHA DIGITAL (ESTILO APPLE/GOOGLE WALLET) -->
+    <div id="view-card" class="wallet-card" style="display: none;">
+      
+      <!-- Top Bar Header -->
+      <div class="card-header-gov">
+        <div class="gov-brand">
+          <img src="assets/img/logo.png" alt="Logo Escola" class="gov-logo">
+          <div class="gov-text">
+            <h2>Santos Dumont</h2>
+            <p>Governo de Sergipe • SEDUC</p>
+          </div>
+        </div>
+        <span class="year-badge">2026</span>
+      </div>
+
+      <!-- Student Name & Info -->
+      <div class="student-info">
+        <div class="student-name" id="card-student-name">NOME DO ESTUDANTE</div>
+
+        <div class="student-details-grid">
+          <div class="detail-item">
+            <span class="detail-label">Matrícula</span>
+            <span class="detail-val" id="card-student-registration">0000000</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">Série / Turma</span>
+            <span class="detail-val" id="card-student-grade-turma">—</span>
+          </div>
+        </div>
+
+        <!-- High-contrast QR Code Box -->
+        <div class="qr-container-box">
+          <div id="qrcode-box"></div>
+        </div>
+
+        <p class="qr-subtext">Aponte o código para o leitor na Portaria ou Refeitório</p>
+      </div>
+
+      <!-- Status Badge Bar -->
+      <div class="status-badge-bar">
+        <span class="badge badge-success" style="font-size: 0.85rem; padding: 0.4rem 1.1rem; letter-spacing: 0.03em;">
+          ● ESTUDANTE ATIVO
+        </span>
+      </div>
+
+      <!-- Logout / Switch Student Footer Button -->
+      <div class="logout-btn-container">
+        <button id="btn-logout-card" class="btn btn-secondary btn-sm" style="opacity: 0.75;" title="Sair do cartão atual">
+          🚪 Sair / Trocar Aluno
+        </button>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- JavaScript Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="js/runtime-config.js"></script>
+  <script src="js/config.js"></script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').then((reg) => reg.update());
+      }
+      const viewLogin = document.getElementById('view-login');
+      const viewCard = document.getElementById('view-card');
+      const formLogin = document.getElementById('form-student-login');
+      const inputReg = document.getElementById('input-student-registration');
+      const errorMsg = document.getElementById('login-error-msg');
+      const btnLogout = document.getElementById('btn-logout-card');
+
+      // 1. Check existing saved card in localStorage
+      const savedStudentJson = localStorage.getItem('cesd_student_card');
+      if (savedStudentJson) {
+        try {
+          const student = JSON.parse(savedStudentJson);
+          if (student && student.registration) {
+            renderStudentCard(student);
+          } else {
+            showLoginView();
+          }
+        } catch (e) {
+          showLoginView();
+        }
+      } else {
+        showLoginView();
+      }
+
+      // 2. Login Form Submission
+      if (formLogin) {
+        formLogin.addEventListener('submit', async (e) => {
+          e.preventDefault();
+          const reg = inputReg.value.trim();
+          if (!reg) return;
+
+          errorMsg.style.display = 'none';
+          errorMsg.textContent = '';
+          
+          const btnSubmit = document.getElementById('btn-access-card');
+          const origText = btnSubmit.innerHTML;
+          btnSubmit.disabled = true;
+          btnSubmit.innerHTML = '🔍 Localizando Estudante...';
+
+          try {
+            let studentObj = null;
+
+            // Query Supabase Cloud
+            if (window.supabaseClient && navigator.onLine) {
+              const { data, error } = await window.supabaseClient
+                .from('students')
+                .select('*')
+                .eq('registration', reg)
+                .eq('active', true)
+                .maybeSingle();
+
+              if (!error && data) {
+                studentObj = {
+                  id: data.id,
+                  name: data.name,
+                  registration: data.registration,
+                  grade: data.grade,
+                  turma: data.turma,
+                  active: data.active,
+                  qrToken: data.qr_token || data.qrToken
+                };
+              }
+            }
+
+            if (studentObj) {
+              localStorage.setItem('cesd_student_card', JSON.stringify(studentObj));
+              renderStudentCard(studentObj);
+            } else {
+              errorMsg.textContent = 'Matrícula não encontrada ou aluno inativo. Procure a secretaria.';
+              errorMsg.style.display = 'block';
+            }
+
+          } catch (err) {
+            errorMsg.textContent = 'Erro ao verificar matrícula: ' + (err.message || 'Erro de conexão.');
+            errorMsg.style.display = 'block';
+          } finally {
+            btnSubmit.disabled = false;
+            btnSubmit.innerHTML = origText;
+          }
+        });
+      }
+
+      // 3. Logout / Switch Student Event
+      if (btnLogout) {
+        btnLogout.addEventListener('click', () => {
+          localStorage.removeItem('cesd_student_card');
+          showLoginView();
+        });
+      }
+
+      function showLoginView() {
+        viewLogin.style.display = 'flex';
+        viewCard.style.display = 'none';
+        inputReg.value = '';
+        errorMsg.style.display = 'none';
+      }
+
+      function renderStudentCard(student) {
+        viewLogin.style.display = 'none';
+        viewCard.style.display = 'flex';
+
+        document.getElementById('card-student-name').textContent = student.name || 'NOME DO ESTUDANTE';
+        document.getElementById('card-student-registration').textContent = student.registration || '—';
+        document.getElementById('card-student-grade-turma').textContent = `${student.grade || ''} — ${student.turma || ''}`;
+
+        // Render High-Contrast QR Code
+        const qrBox = document.getElementById('qrcode-box');
+        qrBox.innerHTML = '';
+        if (typeof QRCode !== 'undefined' && student.qrToken) {
+          new QRCode(qrBox, {
+            text: student.qrToken,
+            width: 180,
+            height: 180,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.H
+          });
+        }
+      }
+
+      // 4. PWA Installation Handler
+      let deferredPrompt = null;
+      const pwaBanner = document.getElementById('pwa-banner');
+      const btnInstall = document.getElementById('btn-install-pwa');
+      const iosBanner = document.getElementById('ios-tip-banner');
+
+      window.addEventListener('beforeinstallprompt', (e) => {
+        e.preventDefault();
+        deferredPrompt = e;
+        if (pwaBanner) pwaBanner.style.display = 'flex';
+      });
+
+      if (btnInstall) {
+        btnInstall.addEventListener('click', async () => {
+          if (deferredPrompt) {
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            if (outcome === 'accepted') {
+              if (pwaBanner) pwaBanner.style.display = 'none';
+            }
+            deferredPrompt = null;
+          }
+        });
+      }
+
+      // iOS Detection
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      const isStandalone = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+
+      if (isIOS && !isStandalone && iosBanner) {
+        iosBanner.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

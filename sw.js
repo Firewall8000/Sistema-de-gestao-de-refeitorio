@@ -10,6 +10,7 @@ const CACHE_NAME = `${CACHE_PREFIX}v3.3.0`;
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
+  './carteirinha.html',
   './manifest.json',
   './css/main.css',
   './css/components.css',
