@@ -90,6 +90,7 @@ const frontendDirectories = [
 
 const frontendFiles = [
   'index.html',
+  'carteirinha.html',
   'manifest.json',
   'sw.js'
 ];
