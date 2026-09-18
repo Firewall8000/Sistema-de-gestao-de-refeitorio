@@ -442,19 +442,19 @@
       const btnLogout = document.getElementById('btn-logout-card');
 
       /**
-       * Text normalization helper:
-       * - Lowercase
-       * - Accent removal (NFD + regex)
-       * - Trim double spaces
+       * Device ID helper for single-device binding rule (LGPD)
        */
-      function normalizeText(text) {
-        if (!text) return '';
-        return text
-          .toLowerCase()
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
+      function getOrCreateDeviceId() {
+        let deviceId = localStorage.getItem('cesd_device_id');
+        if (!deviceId) {
+          if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+            deviceId = crypto.randomUUID();
+          } else {
+            deviceId = 'dev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+          }
+          localStorage.setItem('cesd_device_id', deviceId);
+        }
+        return deviceId;
       }
 
       // 2. Check existing saved card in localStorage
@@ -474,7 +474,7 @@
         showLoginView();
       }
 
-      // 3. Login Form Submission with Double Validation (Name + Registration)
+      // 3. Login Form Submission via RPC bind_student_device
       if (formLogin) {
         formLogin.addEventListener('submit', async (e) => {
           e.preventDefault();
@@ -489,73 +489,61 @@
           const btnSubmit = document.getElementById('btn-access-card');
           const origText = btnSubmit.innerHTML;
           btnSubmit.disabled = true;
-          btnSubmit.innerHTML = '🔍 Validando Cadastro...';
+          btnSubmit.innerHTML = '🔍 Validando Dispositivo...';
 
           try {
-            // a) Verifique se window.supabaseClient existe
             if (!window.supabaseClient) {
               errorMsg.textContent = 'Erro: Cliente do banco não inicializado. Recarregue a página.';
               errorMsg.style.display = 'block';
               return;
             }
 
-            // b) Consulte a matrícula
-            const { data, error } = await window.supabaseClient
-              .from('students')
-              .select('*')
-              .eq('registration', regVal)
-              .maybeSingle();
+            const deviceId = getOrCreateDeviceId();
 
-            // c) Se houver error: exiba a mensagem real do banco
+            // Call Supabase RPC function bind_student_device
+            const { data, error } = await window.supabaseClient.rpc('bind_student_device', {
+              p_registration: regVal,
+              p_name: nameVal,
+              p_device_id: deviceId
+            });
+
             if (error) {
               errorMsg.textContent = 'Erro no banco: ' + error.message;
               errorMsg.style.display = 'block';
               return;
             }
 
-            // d) Se !data: exiba mensagem de matrícula não encontrada
             if (!data) {
-              errorMsg.textContent = 'Matrícula não encontrada no sistema. Verifique o número digitado.';
+              errorMsg.textContent = 'Erro de comunicação com o servidor. Tente novamente.';
               errorMsg.style.display = 'block';
               return;
             }
 
-            // Checagem de cadastro inativo
-            if (data.active === false) {
-              errorMsg.textContent = 'Matrícula com cadastro inativo. Procure a secretaria.';
+            if (data.success === false) {
+              errorMsg.textContent = data.message || 'Falha na vinculação do aparelho.';
               errorMsg.style.display = 'block';
               return;
             }
 
-            // e) Se data for encontrado: compare os nomes usando normalizeText()
-            const normInputName = normalizeText(nameVal);
-            const normDbName = normalizeText(data.name);
+            if (data.success === true && data.student) {
+              const studentObj = {
+                id: data.student.id,
+                name: data.student.name,
+                registration: data.student.registration,
+                grade: data.student.grade,
+                turma: data.student.turma,
+                active: data.student.active,
+                qrToken: data.student.qr_token || data.student.qrToken,
+                photo_url: data.student.photo_url || data.student.photoUrl || ''
+              };
 
-            const namesMatch = (normInputName === normDbName) ||
-                               (normDbName.includes(normInputName)) ||
-                               (normInputName.includes(normDbName));
-
-            if (!namesMatch) {
-              errorMsg.textContent = 'Os dados não conferem. O nome digitado não pertence a esta matrícula.';
+              // Save in localStorage & Render Digital Card
+              localStorage.setItem('cesd_student_card', JSON.stringify(studentObj));
+              renderStudentCard(studentObj);
+            } else {
+              errorMsg.textContent = data.message || 'Resposta inesperada do servidor.';
               errorMsg.style.display = 'block';
-              return;
             }
-
-            // Se o Nome e a Matrícula baterem:
-            const studentObj = {
-              id: data.id,
-              name: data.name,
-              registration: data.registration,
-              grade: data.grade,
-              turma: data.turma,
-              active: data.active,
-              qrToken: data.qr_token || data.qrToken,
-              photo_url: data.photo_url || data.photoUrl || ''
-            };
-
-            // Save in localStorage & Render Digital Card
-            localStorage.setItem('cesd_student_card', JSON.stringify(studentObj));
-            renderStudentCard(studentObj);
 
           } catch (err) {
             errorMsg.textContent = 'Erro ao verificar matrícula: ' + (err.message || 'Erro de conexão.');
