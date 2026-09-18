@@ -248,6 +248,40 @@ class StudentService {
   }
 
   /**
+   * Resets and unbinds the mobile device ID bound to a student (RPC reset_student_device).
+   */
+  async resetStudentDevice(studentId) {
+    if (window.supabaseClient && navigator.onLine) {
+      const { data, error } = await window.supabaseClient.rpc('reset_student_device', {
+        p_student_id: studentId
+      });
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      if (data && data.success === false) {
+        throw new Error(data.message || 'Falha ao desvincular aparelho.');
+      }
+    }
+
+    // Update local IndexedDB record
+    try {
+      const student = await window.dbEngine.get('students', studentId);
+      if (student) {
+        student.bound_device_id = null;
+        student.boundDeviceId = null;
+        student.updatedAt = new Date().toISOString();
+        await window.dbEngine.put('students', student);
+      }
+    } catch (e) {
+      console.warn('⚠️ Falha ao atualizar IndexedDB local para desvinculação:', e);
+    }
+
+    return true;
+  }
+
+  /**
    * Filters student list by search query, grade, and turma.
    */
   async filterStudents(query = '', grade = '', turma = '') {

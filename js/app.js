@@ -446,13 +446,47 @@ async function renderStudentsTable() {
       </td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="openEditStudentModal('${s.id}')">✏️ Editar / QR</button>
+        <button class="btn btn-secondary btn-sm" onclick="confirmResetStudentDevice('${s.id}', '${s.name.replace(/'/g, "\\'")}')" title="Desvincular celular atual e permitir cadastro em novo aparelho">
+          📱 Liberar Celular
+        </button>
         <button class="btn ${s.active ? 'btn-warning' : 'btn-success'} btn-sm" onclick="toggleStudentStatus('${s.id}')">
           ${s.active ? '🚫 Desativar' : '✅ Ativar'}
         </button>
-        <button class="btn btn-danger btn-sm" onclick="confirmDeleteStudent('${s.id}', '${s.name}')" title="Excluir aluno permanentemente">🗑️ Excluir</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmDeleteStudent('${s.id}', '${s.name.replace(/'/g, "\\'")}')" title="Excluir aluno permanentemente">🗑️ Excluir</button>
       </td>
     </tr>
   `).join('');
+}
+
+async function confirmResetStudentDevice(id, name) {
+  const confirmed = await showConfirmModal({
+    title: 'Liberar Novo Celular',
+    message: `Deseja desvincular o aparelho atual do aluno "${name}"?\n\nO celular antigo perderá o acesso e a carteirinha ficará livre para ser cadastrada no novo telefone.`,
+    icon: '🔓',
+    confirmText: 'Sim, Liberar Celular',
+    cancelText: 'Cancelar'
+  });
+
+  if (confirmed) {
+    showLoadingModal('Desvinculando aparelho no servidor...', 'Liberando Acesso');
+    try {
+      await window.studentService.resetStudentDevice(id);
+      hideLoadingModal();
+      renderStudentsTable();
+      await showAlertModal({
+        title: 'Aparelho Liberado',
+        message: 'Aparelho desvinculado com sucesso! O aluno pode agora fazer o login em seu novo celular.',
+        type: 'success'
+      });
+    } catch (err) {
+      hideLoadingModal();
+      await showAlertModal({
+        title: 'Erro ao Liberar Celular',
+        message: err.message || 'Erro ao desvincular aparelho.',
+        type: 'danger'
+      });
+    }
+  }
 }
 
 async function confirmDeleteStudent(id, name) {
@@ -567,6 +601,7 @@ async function refreshDashboardView() {
 
 // Make modal helper functions globally accessible
 window.openEditStudentModal = openEditStudentModal;
+window.confirmResetStudentDevice = confirmResetStudentDevice;
 window.toggleStudentStatus = toggleStudentStatus;
 window.confirmDeleteStudent = confirmDeleteStudent;
 window.showConfirmModal = showConfirmModal;
