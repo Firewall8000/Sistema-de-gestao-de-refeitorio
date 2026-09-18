@@ -322,7 +322,7 @@
             type="text" 
             id="input-student-name" 
             class="form-control" 
-            placeholder="Ex: Poliana de Souza Santos" 
+            placeholder="Ex: Maria da Silva Santos" 
             required
             autocomplete="name"
             style="font-size: 1rem; padding: 0.8rem;"
@@ -335,7 +335,7 @@
             type="text" 
             id="input-student-registration" 
             class="form-control" 
-            placeholder="Ex: 3368032" 
+            placeholder="Ex: 202600123" 
             required
             autocomplete="off"
             style="font-size: 1.1rem; font-weight: 700; letter-spacing: 0.05em; text-align: center; padding: 0.8rem;"
@@ -492,44 +492,56 @@
           btnSubmit.innerHTML = '🔍 Validando Cadastro...';
 
           try {
-            let data = null;
-
-            // Query Supabase Cloud by registration number
-            if (window.supabaseClient && navigator.onLine) {
-              const { data: dbData, error } = await window.supabaseClient
-                .from('students')
-                .select('*')
-                .eq('registration', regVal)
-                .maybeSingle();
-
-              if (!error && dbData) {
-                data = dbData;
-              }
-            }
-
-            // Verification: Student must exist and NOT be inactive (data.active !== false)
-            if (!data || data.active === false) {
-              errorMsg.textContent = 'Matrícula não encontrada ou cadastro inativo. Procure a secretaria.';
+            // a) Verifique se window.supabaseClient existe
+            if (!window.supabaseClient) {
+              errorMsg.textContent = 'Erro: Cliente do banco não inicializado. Recarregue a página.';
               errorMsg.style.display = 'block';
               return;
             }
 
-            // Double Validation: Compare Normalized Name
+            // b) Consulte a matrícula
+            const { data, error } = await window.supabaseClient
+              .from('students')
+              .select('*')
+              .eq('registration', regVal)
+              .maybeSingle();
+
+            // c) Se houver error: exiba a mensagem real do banco
+            if (error) {
+              errorMsg.textContent = 'Erro no banco: ' + error.message;
+              errorMsg.style.display = 'block';
+              return;
+            }
+
+            // d) Se !data: exiba mensagem de matrícula não encontrada
+            if (!data) {
+              errorMsg.textContent = 'Matrícula não encontrada no sistema. Verifique o número digitado.';
+              errorMsg.style.display = 'block';
+              return;
+            }
+
+            // Checagem de cadastro inativo
+            if (data.active === false) {
+              errorMsg.textContent = 'Matrícula com cadastro inativo. Procure a secretaria.';
+              errorMsg.style.display = 'block';
+              return;
+            }
+
+            // e) Se data for encontrado: compare os nomes usando normalizeText()
             const normInputName = normalizeText(nameVal);
             const normDbName = normalizeText(data.name);
 
-            // Compare names with typing tolerance (exact match or containment of primary name)
             const namesMatch = (normInputName === normDbName) ||
                                (normDbName.includes(normInputName)) ||
                                (normInputName.includes(normDbName));
 
             if (!namesMatch) {
-              errorMsg.textContent = 'Os dados não conferem. O nome digitado não corresponde ao titular desta matrícula.';
+              errorMsg.textContent = 'Os dados não conferem. O nome digitado não pertence a esta matrícula.';
               errorMsg.style.display = 'block';
               return;
             }
 
-            // Build Student Card Object
+            // Se o Nome e a Matrícula baterem:
             const studentObj = {
               id: data.id,
               name: data.name,
