@@ -442,6 +442,22 @@
       const btnLogout = document.getElementById('btn-logout-card');
 
       /**
+       * Text normalization helper:
+       * - Lowercase
+       * - Accent removal (NFD + regex)
+       * - Trim double spaces
+       */
+      function normalizeText(text) {
+        if (!text) return '';
+        return text
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      /**
        * Device ID helper for single-device binding rule (LGPD)
        */
       function getOrCreateDeviceId() {
@@ -474,7 +490,7 @@
         showLoginView();
       }
 
-      // 3. Login Form Submission via RPC bind_student_device
+      // 3. Login Form Submission (Direct Search & Binding on students Table)
       if (formLogin) {
         formLogin.addEventListener('submit', async (e) => {
           e.preventDefault();
@@ -489,7 +505,7 @@
           const btnSubmit = document.getElementById('btn-access-card');
           const origText = btnSubmit.innerHTML;
           btnSubmit.disabled = true;
-          btnSubmit.innerHTML = '🔍 Validando Dispositivo...';
+          btnSubmit.innerHTML = '🔍 Validando Cadastro...';
 
           try {
             if (!window.supabaseClient) {
@@ -498,52 +514,84 @@
               return;
             }
 
+            // 1. Query student directly by registration on `students` table
+            const { data: student, error: fetchErr } = await window.supabaseClient
+              .from('students')
+              .select('*')
+              .eq('registration', regVal)
+              .maybeSingle();
+
+            // 2. Search error handling
+            if (fetchErr) {
+              errorMsg.textContent = 'Erro no banco: ' + fetchErr.message;
+              errorMsg.style.display = 'block';
+              return;
+            }
+
+            if (!student) {
+              errorMsg.textContent = 'Matrícula não encontrada no sistema. Verifique o número digitado.';
+              errorMsg.style.display = 'block';
+              return;
+            }
+
+            if (student.active === false) {
+              errorMsg.textContent = 'Matrícula com cadastro inativo. Procure a secretaria.';
+              errorMsg.style.display = 'block';
+              return;
+            }
+
+            // 3. Double Validation (Full Name)
+            const normInputName = normalizeText(nameVal);
+            const normDbName = normalizeText(student.name);
+
+            const namesMatch = (normInputName === normDbName) ||
+                               (normDbName.includes(normInputName)) ||
+                               (normInputName.includes(normDbName));
+
+            if (!namesMatch) {
+              errorMsg.textContent = 'Os dados não conferem. O nome digitado não pertence a esta matrícula.';
+              errorMsg.style.display = 'block';
+              return;
+            }
+
+            // 4. Single Device Binding (LGPD)
             const deviceId = getOrCreateDeviceId();
+            const boundDeviceId = student.bound_device_id || student.boundDeviceId;
 
-            // Call Supabase RPC function bind_student_device
-            const { data, error } = await window.supabaseClient.rpc('bind_student_device', {
-              p_registration: regVal,
-              p_name: nameVal,
-              p_device_id: deviceId
-            });
-
-            if (error) {
-              errorMsg.textContent = 'Erro no banco: ' + error.message;
+            if (!boundDeviceId) {
+              // SCENARIO A: First Access — bind device ID to student
+              try {
+                await window.supabaseClient
+                  .from('students')
+                  .update({ bound_device_id: deviceId, updated_at: new Date().toISOString() })
+                  .eq('id', student.id);
+                student.bound_device_id = deviceId;
+              } catch (updErr) {
+                console.warn('⚠️ Falha ao registrar vinculação no Supabase:', updErr);
+              }
+            } else if (boundDeviceId !== deviceId) {
+              // SCENARIO B: Device mismatch
+              errorMsg.textContent = 'Acesso Bloqueado (LGPD): Esta carteirinha já está vinculada a outro celular. Se você trocou de aparelho, procure a secretaria para redefinir o acesso.';
               errorMsg.style.display = 'block';
               return;
             }
 
-            if (!data) {
-              errorMsg.textContent = 'Erro de comunicação com o servidor. Tente novamente.';
-              errorMsg.style.display = 'block';
-              return;
-            }
+            // 5. Success Flow
+            const studentObj = {
+              id: student.id,
+              name: student.name,
+              registration: student.registration,
+              grade: student.grade,
+              turma: student.turma,
+              active: student.active,
+              qrToken: student.qr_token || student.qrToken,
+              photo_url: student.photo_url || student.photoUrl || '',
+              bound_device_id: deviceId
+            };
 
-            if (data.success === false) {
-              errorMsg.textContent = data.message || 'Falha na vinculação do aparelho.';
-              errorMsg.style.display = 'block';
-              return;
-            }
-
-            if (data.success === true && data.student) {
-              const studentObj = {
-                id: data.student.id,
-                name: data.student.name,
-                registration: data.student.registration,
-                grade: data.student.grade,
-                turma: data.student.turma,
-                active: data.student.active,
-                qrToken: data.student.qr_token || data.student.qrToken,
-                photo_url: data.student.photo_url || data.student.photoUrl || ''
-              };
-
-              // Save in localStorage & Render Digital Card
-              localStorage.setItem('cesd_student_card', JSON.stringify(studentObj));
-              renderStudentCard(studentObj);
-            } else {
-              errorMsg.textContent = data.message || 'Resposta inesperada do servidor.';
-              errorMsg.style.display = 'block';
-            }
+            // Save in localStorage & Render Digital Card
+            localStorage.setItem('cesd_student_card', JSON.stringify(studentObj));
+            renderStudentCard(studentObj);
 
           } catch (err) {
             errorMsg.textContent = 'Erro ao verificar matrícula: ' + (err.message || 'Erro de conexão.');
