@@ -3,6 +3,13 @@
    Main Application Entry & Event Controller (Custom System Dialogs)
    ========================================================================== */
 
+const turmasPorSerie = {
+  '9º Ano': ['Turma A', 'Turma B'],
+  '1º Ano': ['Turma A', 'Turma B', 'Turma C'],
+  '2º Ano': ['Turma A', 'Turma B', 'Turma C', 'Turma D'],
+  '3º Ano': ['Turma A', 'Turma B', 'Turma C', 'Turma D', 'Turma E']
+};
+
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('🚀 Inicializando Sistema Santos Dumont...');
 
@@ -131,10 +138,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnOpenAdd = document.getElementById('btn-open-add-student');
   const btnCloseModal = document.getElementById('btn-close-student-modal');
   const btnCancelStudent = document.getElementById('btn-cancel-student');
+  const modalStudentGrade = document.getElementById('student-grade');
 
   if (btnOpenAdd) btnOpenAdd.addEventListener('click', () => openStudentModal());
   if (btnCloseModal) btnCloseModal.addEventListener('click', () => closeStudentModal());
   if (btnCancelStudent) btnCancelStudent.addEventListener('click', () => closeStudentModal());
+  if (modalStudentGrade) {
+    modalStudentGrade.addEventListener('change', function() {
+      updateModalTurmaOptions(this.value);
+    });
+  }
 
   // Student Form Submission (Create / Edit)
   const formStudent = document.getElementById('form-student');
@@ -395,17 +408,40 @@ async function refreshAllUI() {
   renderStudentsTable();
 }
 
+function updateModalTurmaOptions(selectedGrade, currentTurma = '') {
+  const turmaSelect = document.getElementById('student-turma');
+  if (!turmaSelect) return;
+
+  const turmas = turmasPorSerie[selectedGrade] || ['Turma A', 'Turma B'];
+  turmaSelect.innerHTML = turmas.map(t => `<option value="${t}">${t}</option>`).join('');
+
+  if (currentTurma && turmas.includes(currentTurma)) {
+    turmaSelect.value = currentTurma;
+  } else {
+    turmaSelect.value = turmas[0];
+  }
+}
+
 async function updateTurmaFilterOptions(allStudents) {
   const turmaSelect = document.getElementById('filter-turma');
   if (!turmaSelect) return;
 
   const currentVal = turmaSelect.value;
-  const uniqueTurmas = Array.from(new Set(allStudents.map(s => s.turma).filter(Boolean))).sort();
+  const selectedGrade = document.getElementById('filter-grade')?.value;
+
+  let turmasList;
+  if (selectedGrade && turmasPorSerie[selectedGrade]) {
+    turmasList = turmasPorSerie[selectedGrade];
+  } else {
+    const turmasFromConfig = Object.values(turmasPorSerie).flat();
+    const turmasFromStudents = allStudents ? allStudents.map(s => s.turma).filter(Boolean) : [];
+    turmasList = Array.from(new Set([...turmasFromConfig, ...turmasFromStudents])).sort();
+  }
 
   turmaSelect.innerHTML = '<option value="">Todas as Turmas</option>' + 
-    uniqueTurmas.map(t => `<option value="${t}">${t}</option>`).join('');
+    turmasList.map(t => `<option value="${t}">${t}</option>`).join('');
 
-  if (uniqueTurmas.includes(currentVal)) {
+  if (turmasList.includes(currentVal)) {
     turmaSelect.value = currentVal;
   }
 }
@@ -529,6 +565,11 @@ async function openStudentModal() {
   document.getElementById('student-registration').readOnly = false;
   document.getElementById('qr-preview-area').style.display = 'none';
 
+  const gradeSelect = document.getElementById('student-grade');
+  if (gradeSelect) {
+    updateModalTurmaOptions(gradeSelect.value);
+  }
+
   const modal = document.getElementById('modal-student');
   if (modal) modal.classList.add('active');
 }
@@ -543,7 +584,8 @@ async function openEditStudentModal(id) {
   document.getElementById('student-registration').value = student.registration;
   document.getElementById('student-registration').readOnly = true;
   document.getElementById('student-grade').value = student.grade;
-  document.getElementById('student-turma').value = student.turma;
+
+  updateModalTurmaOptions(student.grade, student.turma);
 
   showQrCodeInModal(student);
 
@@ -601,6 +643,7 @@ async function refreshDashboardView() {
 
 // Make modal helper functions globally accessible
 window.openEditStudentModal = openEditStudentModal;
+window.updateModalTurmaOptions = updateModalTurmaOptions;
 window.confirmResetStudentDevice = confirmResetStudentDevice;
 window.toggleStudentStatus = toggleStudentStatus;
 window.confirmDeleteStudent = confirmDeleteStudent;
