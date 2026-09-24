@@ -39,13 +39,42 @@
     <div class="header-actions">
       <div class="user-badge">
         <span class="user-role-dot"></span>
-        <span id="user-role-label">Operador (Cozinha)</span>
+        <span id="user-role-label">Leitura / Refeitório</span>
       </div>
       <button id="btn-toggle-role" class="btn btn-secondary btn-sm" title="Alternar entre visão do operador e diretoria">
         🔄 Alternar Perfil
       </button>
     </div>
   </header>
+
+  <!-- MODAL: Autenticação de Admin / Diretoria -->
+  <div id="modal-admin-auth" class="modal-backdrop">
+    <div class="modal-box" style="max-width: 420px;">
+      <div class="modal-header">
+        <h3 class="card-title">🔐 Acesso Diretoria / Admin</h3>
+        <button type="button" class="modal-close-btn" id="btn-close-admin-auth-modal">&times;</button>
+      </div>
+
+      <form id="form-admin-auth">
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1rem;">
+          Digite a senha de acesso para liberar a gestão de alunos e relatórios.
+        </p>
+
+        <div class="form-group">
+          <label class="form-label" for="input-admin-password">Senha de Acesso</label>
+          <input type="password" id="input-admin-password" class="form-control" placeholder="Digite a senha..." required autocomplete="current-password">
+          <div id="admin-auth-error" style="display: none; color: var(--color-danger); font-size: 0.85rem; margin-top: 0.5rem; font-weight: 600;"></div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.5rem;">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-admin-auth">Cancelar</button>
+          <button type="submit" class="btn btn-primary" id="btn-confirm-admin-auth">Confirmar Acesso</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Confirmação do Sistema -->
 
   <!-- App Main Content Container -->
   <main class="app-body">

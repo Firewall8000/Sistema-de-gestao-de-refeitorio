@@ -10,6 +10,8 @@ const turmasPorSerie = {
   '3º Ano': ['Turma A', 'Turma B', 'Turma C', 'Turma D', 'Turma E']
 };
 
+const ADMIN_PASSWORD = 'segurança123';
+
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('🚀 Inicializando Sistema Santos Dumont...');
 
@@ -26,9 +28,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     window.syncEngine.init();
   }
 
-  // 3. Apply Initial Role Permissions (OPERATOR / ADMIN)
+  // 3. Apply Initial Role Permissions (Always start at restricted profile: Leitura / Refeitório)
   if (window.authManager) {
-    window.authManager.applyRolePermissions();
+    window.authManager.setRole('OPERATOR');
   }
 
   // 4. Initial Render of Counters & Students Table
@@ -56,18 +58,54 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  // Toggle Role Button
+  // Toggle Role Button (Admin Password Protection)
   const btnToggleRole = document.getElementById('btn-toggle-role');
   if (btnToggleRole) {
-    btnToggleRole.addEventListener('click', async () => {
-      const newRole = window.authManager.toggleRole();
-      const roleText = newRole === 'ADMIN' ? 'Diretoria / Admin' : 'Operador (Cozinha)';
-      await showAlertModal({
-        title: 'Perfil Alterado',
-        message: `O perfil de acesso do sistema foi alterado para: ${roleText}.`,
-        type: 'info',
-        icon: '🔄'
-      });
+    btnToggleRole.addEventListener('click', () => {
+      if (window.authManager && window.authManager.isAdmin()) {
+        // Sair do Admin: retorne imediatamente ao perfil restrito do refeitório
+        window.authManager.setRole('OPERATOR');
+      } else {
+        // Está no refeitório: exiba o modal solicitando a senha
+        openAdminAuthModal();
+      }
+    });
+  }
+
+  // Admin Auth Modal Events & Password Validation
+  const formAdminAuth = document.getElementById('form-admin-auth');
+  const btnCancelAdminAuth = document.getElementById('btn-cancel-admin-auth');
+  const btnCloseAdminAuthModal = document.getElementById('btn-close-admin-auth-modal');
+
+  if (btnCancelAdminAuth) {
+    btnCancelAdminAuth.addEventListener('click', () => closeAdminAuthModal());
+  }
+  if (btnCloseAdminAuthModal) {
+    btnCloseAdminAuthModal.addEventListener('click', () => closeAdminAuthModal());
+  }
+
+  if (formAdminAuth) {
+    formAdminAuth.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const inputPassword = document.getElementById('input-admin-password');
+      const errorMsg = document.getElementById('admin-auth-error');
+      const passwordVal = inputPassword ? inputPassword.value : '';
+
+      if (passwordVal === ADMIN_PASSWORD) {
+        if (window.authManager) {
+          window.authManager.setRole('ADMIN');
+        }
+        closeAdminAuthModal();
+      } else {
+        if (errorMsg) {
+          errorMsg.textContent = 'Senha incorreta';
+          errorMsg.style.display = 'block';
+        }
+        if (inputPassword) {
+          inputPassword.value = '';
+          inputPassword.focus();
+        }
+      }
     });
   }
 
@@ -641,7 +679,40 @@ async function refreshDashboardView() {
   }
 }
 
+function openAdminAuthModal() {
+  const modal = document.getElementById('modal-admin-auth');
+  const inputPassword = document.getElementById('input-admin-password');
+  const errorMsg = document.getElementById('admin-auth-error');
+
+  if (inputPassword) inputPassword.value = '';
+  if (errorMsg) {
+    errorMsg.textContent = '';
+    errorMsg.style.display = 'none';
+  }
+  if (modal) {
+    modal.classList.add('active');
+    setTimeout(() => {
+      if (inputPassword) inputPassword.focus();
+    }, 100);
+  }
+}
+
+function closeAdminAuthModal() {
+  const modal = document.getElementById('modal-admin-auth');
+  const inputPassword = document.getElementById('input-admin-password');
+  const errorMsg = document.getElementById('admin-auth-error');
+
+  if (inputPassword) inputPassword.value = '';
+  if (errorMsg) {
+    errorMsg.textContent = '';
+    errorMsg.style.display = 'none';
+  }
+  if (modal) modal.classList.remove('active');
+}
+
 // Make modal helper functions globally accessible
+window.openAdminAuthModal = openAdminAuthModal;
+window.closeAdminAuthModal = closeAdminAuthModal;
 window.openEditStudentModal = openEditStudentModal;
 window.updateModalTurmaOptions = updateModalTurmaOptions;
 window.confirmResetStudentDevice = confirmResetStudentDevice;

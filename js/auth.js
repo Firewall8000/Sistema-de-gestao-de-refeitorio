@@ -10,7 +10,8 @@ const ROLES = {
 
 class AuthManager {
   constructor() {
-    this.currentRole = localStorage.getItem('sd_user_role') || ROLES.OPERATOR;
+    this.currentRole = ROLES.OPERATOR;
+    localStorage.setItem('sd_user_role', ROLES.OPERATOR);
   }
 
   getCurrentRole() {
@@ -23,6 +24,13 @@ class AuthManager {
 
   isOperator() {
     return this.currentRole === ROLES.OPERATOR;
+  }
+
+  setRole(role) {
+    this.currentRole = role;
+    localStorage.setItem('sd_user_role', this.currentRole);
+    this.applyRolePermissions();
+    return this.currentRole;
   }
 
   /**
@@ -40,11 +48,16 @@ class AuthManager {
    */
   applyRolePermissions() {
     const roleLabel = document.getElementById('user-role-label');
+    const btnToggleRole = document.getElementById('btn-toggle-role');
     const tabStudents = document.getElementById('tab-btn-students');
     const tabDashboard = document.getElementById('tab-btn-dashboard');
 
     if (roleLabel) {
-      roleLabel.textContent = this.isAdmin() ? 'Diretoria / Admin' : 'Operador (Cozinha)';
+      roleLabel.textContent = this.isAdmin() ? 'Diretoria / Admin' : 'Leitura / Refeitório';
+    }
+
+    if (btnToggleRole) {
+      btnToggleRole.textContent = this.isAdmin() ? '🔒 Sair do Admin' : '🔄 Alternar Perfil';
     }
 
     // Role-based visibility

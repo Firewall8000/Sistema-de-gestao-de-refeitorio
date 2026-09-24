@@ -59,11 +59,30 @@ class StudentService {
           .select('*')
           .order('name', { ascending: true });
 
-        if (!error && data) {
+        if (!error && data && data.length > 0) {
           const students = this._mapFromSupabase(data);
-          // Cache locally in IndexedDB
+
+          // 1. Limpa o cache local de alunos com segurança
+          try {
+            if (typeof window.dbEngine.clear === 'function') {
+              await window.dbEngine.clear('students');
+            } else if (typeof window.dbEngine.getDb === 'function') {
+              const db = await window.dbEngine.getDb();
+              const tx = db.transaction('students', 'readwrite');
+              tx.objectStore('students').clear();
+            }
+          } catch (clearErr) {
+            console.warn('Aviso ao limpar cache local:', clearErr);
+          }
+
+          // 2. Salva a lista atualizada no IndexedDB com proteção individual
           for (const s of students) {
-            await window.dbEngine.put('students', s);
+            try {
+              await window.dbEngine.put('students', s);
+            } catch (putErr) {
+              // Se houver conflito de matrícula em algum item, não trava o restante
+              console.warn('Item ignorado no cache local:', s.registration, putErr);
+            }
           }
           return students;
         }
