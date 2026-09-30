@@ -1,6 +1,6 @@
 {
   "name": "Carteirinha do Estudante",
-  "short_name": "Carteirinha do Estudante",
+  "short_name": "Carteirinha CESD",
   "start_url": "/carteirinha.html",
   "display": "standalone",
   "background_color": "#0f172a",
