@@ -45,6 +45,8 @@ class StudentService {
       turma: student.turma,
       active: student.active,
       qr_token: student.qrToken,
+      bound_device_id: student.boundDeviceId || student.bound_device_id || null,
+      photo_url: student.photo_url || student.photoUrl || null,
       updated_at: new Date().toISOString()
     };
   }

@@ -14,9 +14,6 @@ class DashboardController {
   //  SUPABASE REALTIME SUBSCRIPTION
   // ========================================================================
 
-  // ========================================================================
-  //  SUPABASE REALTIME SUBSCRIPTION
-  // ========================================================================
 
   initRealtimeSubscription() {
     if (window.supabaseClient && !this.realtimeSubscribed) {
