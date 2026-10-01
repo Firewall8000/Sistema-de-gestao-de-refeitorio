@@ -27,6 +27,7 @@ class StudentService {
       turma: data.turma,
       active: data.active,
       qrToken: data.qr_token || data.qrToken,
+      boundDeviceId: data.bound_device_id || data.boundDeviceId || null,
       createdAt: data.created_at || data.createdAt,
       updatedAt: data.updated_at || data.updatedAt
     };

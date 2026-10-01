@@ -50,6 +50,7 @@ class AuthManager {
     const roleLabel = document.getElementById('user-role-label');
     const btnToggleRole = document.getElementById('btn-toggle-role');
     const tabStudents = document.getElementById('tab-btn-students');
+    const tabTv = document.getElementById('tab-btn-tv');
     const tabDashboard = document.getElementById('tab-btn-dashboard');
 
     if (roleLabel) {
@@ -60,21 +61,25 @@ class AuthManager {
       btnToggleRole.textContent = this.isAdmin() ? '🔒 Sair do Admin' : '🔄 Alternar Perfil';
     }
 
-    // Role-based visibility
+    // Role-based visibility: TV is always visible, Students & Dashboard are admin-only
+    if (tabTv) tabTv.style.display = 'inline-flex';
+
     if (tabStudents && tabDashboard) {
       if (this.isAdmin()) {
         tabStudents.style.display = 'inline-flex';
         tabDashboard.style.display = 'inline-flex';
       } else {
-        // Operators only focus on the scanner tab
         tabStudents.style.display = 'none';
         tabDashboard.style.display = 'none';
         
         // Force switch to scanner tab if operator is currently on restricted tab
         const activeTab = document.querySelector('.tab-btn.active');
-        if (activeTab && activeTab.getAttribute('data-tab') !== 'tab-scanner') {
-          const scannerTab = document.querySelector('[data-tab="tab-scanner"]');
-          if (scannerTab) scannerTab.click();
+        if (activeTab) {
+          const currentTab = activeTab.getAttribute('data-tab');
+          if (currentTab === 'tab-students' || currentTab === 'tab-dashboard') {
+            const scannerTab = document.querySelector('[data-tab="tab-scanner"]');
+            if (scannerTab) scannerTab.click();
+          }
         }
       }
     }

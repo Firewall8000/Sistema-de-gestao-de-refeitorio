@@ -419,6 +419,60 @@
 
     </div>
 
+    <!-- LUNCH REMINDER CARD (Vibra Call + Justificativa) -->
+    <div id="lunch-reminder-card" style="display: none; margin-top: 0.5rem;">
+      <div class="card" style="border: 2px solid rgba(245, 158, 11, 0.5); background: linear-gradient(145deg, rgba(245, 158, 11, 0.12) 0%, rgba(234, 88, 12, 0.08) 100%); border-radius: 16px; padding: 1.25rem; animation: feedSlideIn 0.4s ease;">
+        
+        <div style="text-align: center; margin-bottom: 0.75rem;">
+          <div style="font-size: 1.8rem;">⏰</div>
+          <h3 id="reminder-title" style="font-size: 1rem; font-weight: 800; color: #fbbf24; margin-top: 0.25rem;">Lembrete das 12:20</h3>
+          <p id="reminder-subtitle" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem;">O almoço encerra às 12:45! Você ainda não passou no refeitório.</p>
+        </div>
+
+        <!-- Justification Options -->
+        <div id="justification-options" style="display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem;">
+          <button type="button" class="btn btn-secondary btn-sm justif-btn" data-motivo="marmita" style="text-align: left; padding: 0.65rem 0.85rem; border-radius: 10px; font-size: 0.88rem;">
+            🍱 Trouxe comida de casa (Marmita)
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm justif-btn" data-motivo="externa" style="text-align: left; padding: 0.65rem 0.85rem; border-radius: 10px; font-size: 0.88rem;">
+            🛵 Comida externa / Meus pais trouxeram
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm justif-btn" data-motivo="a_caminho" style="text-align: left; padding: 0.65rem 0.85rem; border-radius: 10px; font-size: 0.88rem;">
+            🍽️ Estou a caminho do refeitório
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm justif-btn" data-motivo="saude" style="text-align: left; padding: 0.65rem 0.85rem; border-radius: 10px; font-size: 0.88rem;">
+            🩺 Motivo de saúde / Indisposição
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm justif-btn" data-motivo="outros" style="text-align: left; padding: 0.65rem 0.85rem; border-radius: 10px; font-size: 0.88rem;">
+            ✍️ Outros
+          </button>
+        </div>
+
+        <!-- Dynamic 'Outros' Text Field -->
+        <div id="container-outros-motivo" style="display: none; margin-top: 4px; margin-bottom: 0.75rem;">
+          <label style="font-size: 0.8rem; color: #cbd5e1; font-weight: 600;">Outros: Descreva o motivo</label>
+          <input type="text" id="input-motivo-outros" class="form-control" placeholder="Escreva aqui por que ainda não foi almoçar..." style="margin-top: 4px; width: 100%; padding: 0.65rem; border-radius: 8px;">
+        </div>
+
+        <!-- Justification Error / Info -->
+        <div id="justif-error-msg" style="display: none; color: var(--color-danger); font-size: 0.82rem; margin-bottom: 0.5rem; text-align: center; font-weight: 600;"></div>
+
+        <!-- Confirm Button -->
+        <button type="button" id="btn-enviar-justificativa" class="btn btn-primary" style="width: 100%; padding: 0.7rem; border-radius: 10px; font-size: 0.95rem; font-weight: 700;">
+          📩 Enviar Justificativa
+        </button>
+      </div>
+    </div>
+
+    <!-- SUCCESS CARD (after justification submitted) -->
+    <div id="justif-success-card" style="display: none; margin-top: 0.5rem;">
+      <div class="card" style="border: 2px solid rgba(16, 185, 129, 0.5); background: linear-gradient(145deg, rgba(16, 185, 129, 0.12) 0%, rgba(52, 211, 153, 0.08) 100%); border-radius: 16px; padding: 1.25rem; text-align: center;">
+        <div style="font-size: 2rem; margin-bottom: 0.25rem;">✅</div>
+        <h3 id="justif-success-title" style="font-size: 1rem; font-weight: 800; color: #34d399;">Justificativa registrada!</h3>
+        <p id="justif-success-text" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem;">A diretoria foi informada.</p>
+      </div>
+    </div>
+
   </div>
 
   <!-- JavaScript Scripts -->
@@ -459,19 +513,52 @@
       }
 
       /**
-       * Device ID helper for single-device binding rule (LGPD)
+       * Secure Device Fingerprint Generator (Web Crypto API - SHA-256)
+       * Creates a cryptographic hash combining hardware/browser signals
+       * and the student's registration for single-device binding (LGPD).
        */
-      function getOrCreateDeviceId() {
-        let deviceId = localStorage.getItem('cesd_device_id');
-        if (!deviceId) {
-          if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-            deviceId = crypto.randomUUID();
-          } else {
-            deviceId = 'dev_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+      async function generateSecureDeviceFingerprint(registration) {
+        // Check for a previously generated fingerprint for this registration
+        const storageKey = 'cesd_device_fp_' + registration;
+        const savedFingerprint = localStorage.getItem(storageKey);
+        if (savedFingerprint) return savedFingerprint;
+
+        // Collect device signals for fingerprint seed
+        const rawParts = [
+          navigator.userAgent || '',
+          navigator.language || '',
+          screen.width + 'x' + screen.height,
+          screen.colorDepth || '',
+          Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+          navigator.hardwareConcurrency || '',
+          navigator.platform || '',
+          registration
+        ];
+        const rawString = rawParts.join('|');
+
+        let fingerprint;
+        try {
+          // Use Web Crypto API (SHA-256) for a secure hash
+          const encoder = new TextEncoder();
+          const dataBuffer = encoder.encode(rawString);
+          const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer);
+          const hashArray = Array.from(new Uint8Array(hashBuffer));
+          fingerprint = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        } catch (e) {
+          // Fallback for environments without Web Crypto API
+          console.warn('⚠️ Web Crypto API indisponível, usando fallback:', e);
+          let hash = 0;
+          for (let i = 0; i < rawString.length; i++) {
+            const char = rawString.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash; // Convert to 32-bit integer
           }
-          localStorage.setItem('cesd_device_id', deviceId);
+          fingerprint = 'fb_' + Math.abs(hash).toString(16) + '_' + Date.now().toString(36);
         }
-        return deviceId;
+
+        // Persist for this registration
+        localStorage.setItem(storageKey, fingerprint);
+        return fingerprint;
       }
 
       // 2. Check existing saved card in localStorage
@@ -555,8 +642,8 @@
               return;
             }
 
-            // 4. Single Device Binding (LGPD)
-            const deviceId = getOrCreateDeviceId();
+            // 4. Single Device Binding (LGPD) — SHA-256 Fingerprint
+            const deviceId = await generateSecureDeviceFingerprint(regVal);
             const boundDeviceId = student.bound_device_id || student.boundDeviceId;
 
             if (!boundDeviceId) {
@@ -644,6 +731,230 @@
             correctLevel: QRCode.CorrectLevel.H
           });
         }
+
+        // Initialize Lunch Reminder System
+        initLunchReminder(student);
+      }
+
+      // ================================================================
+      //  LUNCH REMINDER SYSTEM (Vibra Call + Justificativa Alimentar)
+      // ================================================================
+
+      /**
+       * Checks if current time is within the lunch reminder window (12:20 - 13:00)
+       */
+      function isLunchReminderWindow() {
+        const now = new Date();
+        const hours = now.getHours();
+        const minutes = now.getMinutes();
+        // Ativo a partir das 12:20 até às 13:00
+        return (hours === 12 && minutes >= 20);
+      }
+
+      /**
+       * Returns today's date as YYYY-MM-DD string
+       */
+      function getTodayStr() {
+        const d = new Date();
+        return d.toISOString().split('T')[0];
+      }
+
+      /**
+       * Checks if student already has a meal_log or justification for today
+       */
+      async function hasStudentLunchedToday(registration) {
+        const todayKey = 'cesd_lunch_justified_' + registration + '_' + getTodayStr();
+        if (localStorage.getItem(todayKey)) return true;
+
+        if (window.supabaseClient && navigator.onLine) {
+          try {
+            const { data, error } = await window.supabaseClient
+              .from('meal_logs')
+              .select('id')
+              .eq('student_registration', registration)
+              .eq('date', getTodayStr())
+              .maybeSingle();
+            if (!error && data) return true;
+          } catch (e) {}
+        }
+        return false;
+      }
+
+      let lunchReminderInterval = null;
+      let lunchReminderTriggered = false;
+
+      /**
+       * Initializes the lunch reminder engine for the logged-in student
+       */
+      async function initLunchReminder(student) {
+        // Reset state
+        lunchReminderTriggered = false;
+        if (lunchReminderInterval) clearInterval(lunchReminderInterval);
+
+        const reminderCard = document.getElementById('lunch-reminder-card');
+        const successCard = document.getElementById('justif-success-card');
+        if (reminderCard) reminderCard.style.display = 'none';
+        if (successCard) successCard.style.display = 'none';
+
+        // Check immediately, then check every 30 seconds
+        await checkAndTriggerReminder(student);
+        lunchReminderInterval = setInterval(() => checkAndTriggerReminder(student), 30000);
+      }
+
+      async function checkAndTriggerReminder(student) {
+        if (lunchReminderTriggered) return;
+        if (!isLunchReminderWindow()) return;
+
+        const alreadyLunched = await hasStudentLunchedToday(student.registration);
+        if (alreadyLunched) return;
+
+        // TRIGGER REMINDER!
+        lunchReminderTriggered = true;
+
+        // Vibra Call pattern
+        if ('vibrate' in navigator) {
+          navigator.vibrate([300, 100, 300, 100, 500]);
+        }
+
+        // Show the reminder card
+        const reminderCard = document.getElementById('lunch-reminder-card');
+        if (reminderCard) reminderCard.style.display = 'block';
+
+        // Setup justification interaction
+        setupJustificationHandlers(student);
+      }
+
+      let selectedMotivo = null;
+
+      function setupJustificationHandlers(student) {
+        selectedMotivo = null;
+        const justifBtns = document.querySelectorAll('.justif-btn');
+        const containerOutros = document.getElementById('container-outros-motivo');
+        const inputOutros = document.getElementById('input-motivo-outros');
+        const justifError = document.getElementById('justif-error-msg');
+        const btnEnviar = document.getElementById('btn-enviar-justificativa');
+
+        // Motivo selection buttons
+        justifBtns.forEach(btn => {
+          btn.addEventListener('click', () => {
+            // Visual toggle: deselect all, select current
+            justifBtns.forEach(b => {
+              b.style.background = '';
+              b.style.borderColor = '';
+              b.style.color = '';
+            });
+            btn.style.background = 'rgba(59, 130, 246, 0.2)';
+            btn.style.borderColor = 'rgba(59, 130, 246, 0.5)';
+            btn.style.color = '#93c5fd';
+
+            selectedMotivo = btn.getAttribute('data-motivo');
+
+            // Toggle 'Outros' field
+            if (selectedMotivo === 'outros') {
+              containerOutros.style.display = 'block';
+              if (inputOutros) inputOutros.focus();
+            } else {
+              containerOutros.style.display = 'none';
+              if (inputOutros) inputOutros.value = '';
+            }
+
+            // Hide any error
+            justifError.style.display = 'none';
+          });
+        });
+
+        // Submit button handler
+        btnEnviar.addEventListener('click', async () => {
+          justifError.style.display = 'none';
+
+          if (!selectedMotivo) {
+            justifError.textContent = 'Selecione um motivo antes de enviar.';
+            justifError.style.display = 'block';
+            return;
+          }
+
+          // If 'a_caminho', just dismiss with encouragement
+          if (selectedMotivo === 'a_caminho') {
+            const reminderCard = document.getElementById('lunch-reminder-card');
+            if (reminderCard) reminderCard.style.display = 'none';
+            const successCard = document.getElementById('justif-success-card');
+            const successTitle = document.getElementById('justif-success-title');
+            const successText = document.getElementById('justif-success-text');
+            if (successTitle) successTitle.textContent = 'Corra que dá tempo!';
+            if (successText) successText.textContent = 'O refeitório atende até 12:45. Bom almoço! 🍽️';
+            if (successCard) successCard.style.display = 'block';
+            if ('vibrate' in navigator) navigator.vibrate([100]);
+            return;
+          }
+
+          // If 'outros', validate text field
+          const notesText = (inputOutros ? inputOutros.value.trim() : '');
+          if (selectedMotivo === 'outros' && !notesText) {
+            justifError.textContent = 'Por favor, descreva brevemente o motivo no campo acima.';
+            justifError.style.display = 'block';
+            if (inputOutros) inputOutros.focus();
+            return;
+          }
+
+          // Disable button during submission
+          btnEnviar.disabled = true;
+          btnEnviar.textContent = '⏳ Enviando...';
+
+          try {
+            // Build record
+            const record = {
+              student_id: student.id,
+              student_registration: student.registration,
+              student_name: student.name,
+              turma: student.turma || '',
+              grade: student.grade || '',
+              date: getTodayStr(),
+              meal_status: selectedMotivo,
+              notes: selectedMotivo === 'outros' ? notesText : null,
+              validation_method: 'app_auto_declaracao',
+              qr_token_used: student.qrToken || null,
+              timestamp: new Date().toISOString()
+            };
+
+            // Save to Supabase
+            if (window.supabaseClient && navigator.onLine) {
+              const { error } = await window.supabaseClient
+                .from('meal_logs')
+                .insert(record);
+              if (error) {
+                console.warn('⚠️ Erro ao gravar justificativa no Supabase:', error.message);
+                justifError.textContent = 'Erro ao enviar: ' + error.message;
+                justifError.style.display = 'block';
+                return;
+              }
+            }
+
+            // Mark as justified locally
+            const todayKey = 'cesd_lunch_justified_' + student.registration + '_' + getTodayStr();
+            localStorage.setItem(todayKey, selectedMotivo);
+
+            // Confirmation vibration
+            if ('vibrate' in navigator) navigator.vibrate([100, 50, 100]);
+
+            // Show success card
+            const reminderCard = document.getElementById('lunch-reminder-card');
+            if (reminderCard) reminderCard.style.display = 'none';
+
+            const successCard = document.getElementById('justif-success-card');
+            const successTitle = document.getElementById('justif-success-title');
+            const successText = document.getElementById('justif-success-text');
+            if (successTitle) successTitle.textContent = '✓ Justificativa registrada!';
+            if (successText) successText.textContent = 'A diretoria foi informada.';
+            if (successCard) successCard.style.display = 'block';
+
+          } catch (err) {
+            justifError.textContent = 'Erro de conexão: ' + (err.message || 'Tente novamente.');
+            justifError.style.display = 'block';
+          } finally {
+            btnEnviar.disabled = false;
+            btnEnviar.textContent = '📩 Enviar Justificativa';
+          }
+        });
       }
 
       /**

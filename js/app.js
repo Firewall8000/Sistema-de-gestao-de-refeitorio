@@ -54,6 +54,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       // Refresh tab specific data
       if (targetId === 'tab-students') renderStudentsTable();
+      if (targetId === 'tab-tv') refreshTvView();
       if (targetId === 'tab-dashboard') refreshDashboardView();
     });
   });
@@ -325,24 +326,33 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Report Date & Status Filters
-  const reportDateInput = document.getElementById('report-date');
+  // Report Status Filter & Audit Search
   const reportStatusFilter = document.getElementById('report-filter-status');
+  const auditSearch = document.getElementById('audit-search');
   const btnExportCsv = document.getElementById('btn-export-csv');
 
-  if (reportDateInput) {
-    reportDateInput.value = window.mealValidatorService.getTodayDateString();
-    reportDateInput.addEventListener('change', () => refreshDashboardView());
-  }
   if (reportStatusFilter) {
     reportStatusFilter.addEventListener('change', () => refreshDashboardView());
   }
+  if (auditSearch) {
+    auditSearch.addEventListener('input', () => refreshDashboardView());
+  }
   if (btnExportCsv) {
     btnExportCsv.addEventListener('click', () => {
-      const dateVal = reportDateInput ? reportDateInput.value : '';
+      const dateVal = window.mealValidatorService ? window.mealValidatorService.getTodayDateString() : '';
       window.dashboardController.exportReportCsv(dateVal);
     });
   }
+
+  // Dashboard Period Selector Buttons
+  document.querySelectorAll('.dash-period-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const period = btn.getAttribute('data-period');
+      if (window.dashboardController) {
+        window.dashboardController.setCurrentPeriod(period);
+      }
+    });
+  });
 });
 
 // ------------------------------------------------------------------------
@@ -514,9 +524,12 @@ async function renderStudentsTable() {
       <td>${s.name}</td>
       <td>${s.grade} — ${s.turma}</td>
       <td>
-        ${s.active 
-          ? '<span class="badge badge-success">ATIVO</span>' 
-          : '<span class="badge badge-danger">INATIVO</span>'}
+        ${!s.active 
+          ? '<span class="badge badge-danger">INATIVO</span>' 
+          : (s.boundDeviceId 
+            ? '<span class="badge badge-success">ATIVO • CADASTRADO</span>' 
+            : '<span class="badge badge-info">ATIVO</span>')
+        }
       </td>
       <td>
         <button class="btn btn-secondary btn-sm" onclick="openEditStudentModal('${s.id}')">✏️ Editar / QR</button>
@@ -668,14 +681,18 @@ async function toggleStudentStatus(id) {
   }
 }
 
+async function refreshTvView() {
+  if (window.dashboardController) {
+    window.dashboardController.initRealtimeSubscription();
+    window.dashboardController.startTvClock();
+    await window.dashboardController.refreshTvFeed();
+  }
+}
+
 async function refreshDashboardView() {
   if (window.dashboardController) {
     window.dashboardController.initRealtimeSubscription();
-    await window.dashboardController.refreshTodayMetrics();
-    await window.dashboardController.loadLunchQueueTable();
-    const dateVal = document.getElementById('report-date')?.value;
-    const statusVal = document.getElementById('report-filter-status')?.value;
-    await window.dashboardController.loadReportTable(dateVal, statusVal);
+    await window.dashboardController.refreshDashboardForPeriod();
   }
 }
 

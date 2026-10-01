@@ -1,31 +1,40 @@
 /* ==========================================================================
    SANTOS DUMONT - REFECTORY QR SYSTEM
-   Director Dashboard Controller, Real-time Queue & Report Generator
+   Director Dashboard Controller, TV Live Feed, AI Engine & Report Generator
    ========================================================================== */
 
 class DashboardController {
   constructor() {
     this.realtimeSubscribed = false;
+    this.tvClockInterval = null;
+    this.currentPeriod = 'today';
   }
 
-  /**
-   * Initializes Supabase Realtime subscription for school_entries and meal_logs tables.
-   */
+  // ========================================================================
+  //  SUPABASE REALTIME SUBSCRIPTION
+  // ========================================================================
+
+  // ========================================================================
+  //  SUPABASE REALTIME SUBSCRIPTION
+  // ========================================================================
+
   initRealtimeSubscription() {
     if (window.supabaseClient && !this.realtimeSubscribed) {
       this.realtimeSubscribed = true;
       try {
         window.supabaseClient
           .channel('realtime_dashboard_queue')
+          // Escuta novas entradas na portaria
           .on('postgres_changes', { event: '*', schema: 'public', table: 'school_entries' }, () => {
-            console.log('⚡ Realtime update received on school_entries');
             this.refreshTodayMetrics();
-            this.loadLunchQueueTable();
+            this.refreshTvFeed();
+            this.refreshDashboardForPeriod();
           })
+          // Escuta novas refeições no refeitório
           .on('postgres_changes', { event: '*', schema: 'public', table: 'meal_logs' }, () => {
-            console.log('⚡ Realtime update received on meal_logs');
             this.refreshTodayMetrics();
-            this.loadLunchQueueTable();
+            this.refreshTvFeed();
+            this.refreshDashboardForPeriod();
           })
           .subscribe();
       } catch (err) {
@@ -34,51 +43,92 @@ class DashboardController {
     }
   }
 
-  /**
-   * Updates real-time KPI metrics cards for today.
-   */
+  // ========================================================================
+  //  PERIOD HELPER (Today / Week / Month)
+  // ========================================================================
+
+  getPeriodDates(period) {
+    const now = new Date();
+    const todayStr = this._dateStr(now);
+    
+    if (period === 'today') {
+      return { start: todayStr, end: todayStr, label: 'Hoje' };
+    }
+    
+    if (period === 'week') {
+      const dayOfWeek = now.getDay();
+      const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + mondayOffset);
+      return { start: this._dateStr(monday), end: todayStr, label: 'Esta Semana' };
+    }
+    
+    if (period === 'month') {
+      const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+      return { start: this._dateStr(firstDay), end: todayStr, label: 'Este Mês' };
+    }
+    
+    return { start: todayStr, end: todayStr, label: 'Hoje' };
+  }
+
+  _dateStr(d) {
+    return d.toISOString().split('T')[0];
+  }
+
+  setCurrentPeriod(period) {
+    this.currentPeriod = period;
+    
+    document.querySelectorAll('.dash-period-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.getAttribute('data-period') === period);
+    });
+    
+    const badgeEl = document.getElementById('ai-period-badge');
+    const { label } = this.getPeriodDates(period);
+    if (badgeEl) badgeEl.textContent = label;
+    
+    this.refreshDashboardForPeriod();
+  }
+
+  async refreshDashboardForPeriod() {
+    await this.refreshTodayMetrics();
+    await this.loadAuditTable();
+    await this.generateAIInsights();
+  }
+
+  // ========================================================================
+  //  KPI METRICS
+  // ========================================================================
+
   async refreshTodayMetrics() {
     if (!window.dbEngine || !window.mealValidatorService) return;
 
-    // 1. Total Active Students
     const allStudents = await window.studentService.getAllStudents();
     const activeStudents = allStudents.filter(s => s.active);
     const totalActiveCount = activeStudents.length;
 
-    // 2. Count Present Today in School (Portaria entries)
     let totalPresentCount = 0;
     if (window.mealValidatorService.getTodayEntriesCount) {
       totalPresentCount = await window.mealValidatorService.getTodayEntriesCount();
     }
 
-    // 3. Count Served Today in Refectory (Meal logs)
     const servedTodayCount = await window.mealValidatorService.getTodayMealsCount();
-
-    // 4. External Food / Did Not Eat Lunch: Math.max(0, totalPresentes - totalAlmoco)
     const externalFoodCount = Math.max(0, totalPresentCount - servedTodayCount);
 
-    // 5. Adhesion Rate: (totalAlmoco / totalPresentes) * 100 if totalPresentes > 0, else 0.0%
-    const rateVal = totalPresentCount > 0 
-      ? ((servedTodayCount / totalPresentCount) * 100).toFixed(1) 
-      : '0.0';
-
-    // Update UI Cards
     const elTotal = document.getElementById('dash-total-students');
     const elPresent = document.getElementById('dash-present-today');
     const elServed = document.getElementById('dash-served-today');
     const elExternal = document.getElementById('dash-external-food');
-    const elRate = document.getElementById('dash-rate');
 
     if (elTotal) elTotal.textContent = totalActiveCount;
     if (elPresent) elPresent.textContent = totalPresentCount;
     if (elServed) elServed.textContent = servedTodayCount;
     if (elExternal) elExternal.textContent = externalFoodCount;
-    if (elRate) elRate.textContent = `${rateVal}%`;
   }
 
-  /**
-   * Loads real-time lunch queue table from Supabase view `lunch_queue_today` (with IndexedDB offline fallback).
-   */
+  // ========================================================================
+  //  LUNCH QUEUE TABLE (legacy support)
+  // ========================================================================
+
   async loadLunchQueueTable() {
     const tbody = document.getElementById('lunch-queue-table-body');
     if (!tbody) return;
@@ -86,7 +136,6 @@ class DashboardController {
     const todayStr = window.mealValidatorService.getTodayDateString();
     let queueList = null;
 
-    // 1. Try Supabase View `lunch_queue_today`
     if (window.supabaseClient && navigator.onLine) {
       try {
         const { data, error } = await window.supabaseClient
@@ -108,7 +157,6 @@ class DashboardController {
       }
     }
 
-    // 2. Offline / Local Fallback via IndexedDB
     if (!queueList) {
       try {
         const todayEntries = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', todayStr);
@@ -119,7 +167,6 @@ class DashboardController {
         const mealRegs = new Set(todayMeals.map(m => m.studentRegistration || m.student_registration));
         const studentMapById = new Map(allStudents.map(s => [s.id, s]));
 
-        // Filter entries where student hasn't eaten lunch today
         const unservedEntries = todayEntries.filter(entry => {
           const sId = entry.student_id || entry.studentId;
           const sReg = entry.student_registration || entry.studentRegistration;
@@ -128,7 +175,6 @@ class DashboardController {
           return true;
         });
 
-        // Sort by entry_time ASC
         unservedEntries.sort((a, b) => {
           const tA = new Date(a.entry_time || a.entryTime).getTime();
           const tB = new Date(b.entry_time || b.entryTime).getTime();
@@ -151,7 +197,6 @@ class DashboardController {
       }
     }
 
-    // 3. Render Queue Table
     if (queueList.length === 0) {
       tbody.innerHTML = `
         <tr>
@@ -181,33 +226,161 @@ class DashboardController {
     }).join('');
   }
 
-  /**
-   * Loads report table for a specific date and status filter.
-   */
-  async loadReportTable(dateString, statusFilter = 'ALL') {
+  // ========================================================================
+  //  TV LIVE FEED
+  // ========================================================================
+
+  startTvClock() {
+    if (this.tvClockInterval) return;
+    const clockEl = document.getElementById('tv-clock');
+    if (!clockEl) return;
+
+    const updateClock = () => {
+      const now = new Date();
+      clockEl.textContent = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    };
+    updateClock();
+    this.tvClockInterval = setInterval(updateClock, 1000);
+  }
+
+  stopTvClock() {
+    if (this.tvClockInterval) {
+      clearInterval(this.tvClockInterval);
+      this.tvClockInterval = null;
+    }
+  }
+
+  async refreshTvFeed() {
+    if (!window.dbEngine || !window.mealValidatorService) return;
+
+    const todayStr = window.mealValidatorService.getTodayDateString();
+
+    let todayEntries = [];
+    let todayMeals = [];
+    let allStudents = [];
+
+    try {
+      todayEntries = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', todayStr);
+    } catch (e) {}
+    try {
+      todayMeals = await window.dbEngine.getAllByIndex('meal_logs', 'date', todayStr);
+    } catch (e) {}
+    try {
+      allStudents = await window.studentService.getAllStudents();
+    } catch (e) {}
+
+    const studentMap = new Map(allStudents.map(s => [s.id, s]));
+    const studentMapByReg = new Map(allStudents.map(s => [s.registration, s]));
+
+    // Counters
+    const presentCount = todayEntries.length;
+    const servedCount = todayMeals.length;
+    const waitingCount = Math.max(0, presentCount - servedCount);
+
+    const elPresent = document.getElementById('tv-present-count');
+    const elServed = document.getElementById('tv-served-count');
+    const elWaiting = document.getElementById('tv-waiting-count');
+    const elPortariaTotal = document.getElementById('tv-portaria-total');
+    const elRefTotal = document.getElementById('tv-refeitorio-total');
+
+    if (elPresent) elPresent.textContent = presentCount;
+    if (elServed) elServed.textContent = servedCount;
+    if (elWaiting) elWaiting.textContent = waitingCount;
+    if (elPortariaTotal) elPortariaTotal.textContent = presentCount;
+    if (elRefTotal) elRefTotal.textContent = servedCount;
+
+    // Portaria Feed (sorted by most recent first)
+    const portariaList = document.getElementById('tv-feed-portaria-list');
+    if (portariaList) {
+      const sorted = [...todayEntries].sort((a, b) => {
+        return new Date(b.entry_time || b.entryTime).getTime() - new Date(a.entry_time || a.entryTime).getTime();
+      });
+
+      if (sorted.length === 0) {
+        portariaList.innerHTML = '<div class="tv-feed-empty">Nenhum registro de entrada hoje</div>';
+      } else {
+        portariaList.innerHTML = sorted.map((entry, idx) => {
+          const sId = entry.student_id || entry.studentId;
+          const sObj = studentMap.get(sId);
+          const name = entry.student_name || (sObj ? sObj.name : 'Aluno');
+          const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : '';
+          const time = window.mealValidatorService.formatTimeString(entry.entry_time || entry.entryTime);
+          return `
+            <div class="tv-feed-item ${idx === 0 ? 'tv-feed-item-new' : ''}">
+              <div class="tv-feed-item-name" title="${name}">${name}</div>
+              <div class="tv-feed-item-meta">
+                <div class="tv-feed-item-time">${time}</div>
+                <div>${gradeTurma}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    // Refeitório Feed (sorted by most recent first)
+    const refList = document.getElementById('tv-feed-refeitorio-list');
+    if (refList) {
+      const sortedMeals = [...todayMeals].sort((a, b) => {
+        return new Date(b.timestamp || b.created_at).getTime() - new Date(a.timestamp || a.created_at).getTime();
+      });
+
+      if (sortedMeals.length === 0) {
+        refList.innerHTML = '<div class="tv-feed-empty">Nenhum almoço registrado hoje</div>';
+      } else {
+        refList.innerHTML = sortedMeals.map((meal, idx) => {
+          const reg = meal.studentRegistration || meal.student_registration;
+          const sObj = studentMapByReg.get(reg);
+          const name = meal.studentName || (sObj ? sObj.name : 'Aluno');
+          const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : '';
+          const time = window.mealValidatorService.formatTimeString(meal.timestamp || meal.created_at);
+          return `
+            <div class="tv-feed-item ${idx === 0 ? 'tv-feed-item-new' : ''}">
+              <div class="tv-feed-item-name" title="${name}">${name}</div>
+              <div class="tv-feed-item-meta">
+                <div class="tv-feed-item-time">${time}</div>
+                <div>${gradeTurma}</div>
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+  }
+
+  // ========================================================================
+  //  AUDIT TABLE (Dashboard)
+  // ========================================================================
+
+  async loadAuditTable() {
     const tbody = document.getElementById('report-table-body');
     if (!tbody) return;
 
-    if (!dateString) {
-      dateString = window.mealValidatorService.getTodayDateString();
-    }
+    const statusFilter = document.getElementById('report-filter-status')?.value || 'ALL';
+    const searchQuery = (document.getElementById('audit-search')?.value || '').toLowerCase().trim();
+    const todayStr = window.mealValidatorService.getTodayDateString();
 
     const allStudents = await window.studentService.getAllStudents();
     const activeStudents = allStudents.filter(s => s.active);
 
-    const mealsOnDate = await window.dbEngine.getAllByIndex('meal_logs', 'date', dateString);
-    const mealMapByReg = new Map(mealsOnDate.map(m => [m.studentRegistration, m]));
+    const mealsOnDate = await window.dbEngine.getAllByIndex('meal_logs', 'date', todayStr);
+    const mealMapByReg = new Map(mealsOnDate.map(m => [m.studentRegistration || m.student_registration, m]));
 
     let entriesOnDate = [];
     try {
-      entriesOnDate = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', dateString);
+      entriesOnDate = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', todayStr);
     } catch (e) {}
 
-    const entryStudentIds = new Set(entriesOnDate.map(e => e.student_id || e.studentId));
+    const entryMapByStudentId = new Map();
+    entriesOnDate.forEach(e => {
+      const sId = e.student_id || e.studentId;
+      if (sId) entryMapByStudentId.set(sId, e);
+    });
 
     let reportRows = activeStudents.map(student => {
       const meal = mealMapByReg.get(student.registration);
-      const isPresent = entryStudentIds.has(student.id) || !!meal;
+      const entry = entryMapByStudentId.get(student.id);
+      const isPresent = !!entry || !!meal;
 
       return {
         registration: student.registration,
@@ -215,12 +388,15 @@ class DashboardController {
         gradeTurma: `${student.grade} — ${student.turma}`,
         present: isPresent,
         served: !!meal,
-        time: meal ? window.mealValidatorService.formatTimeString(meal.timestamp) : '—',
-        method: meal ? meal.validationMethod : '—'
+        entryTime: entry ? window.mealValidatorService.formatTimeString(entry.entry_time || entry.entryTime) : '—',
+        mealTime: meal ? window.mealValidatorService.formatTimeString(meal.timestamp) : '—',
+        method: meal ? (meal.validationMethod || meal.validation_method) : '—',
+        mealStatus: meal ? (meal.mealStatus || meal.meal_status || null) : null,
+        mealNotes: meal ? (meal.notes || null) : null
       };
     });
 
-    // Apply Filter
+    // Apply Status Filter
     if (statusFilter === 'SERVED') {
       reportRows = reportRows.filter(r => r.served);
     } else if (statusFilter === 'PENDING') {
@@ -229,37 +405,172 @@ class DashboardController {
       reportRows = reportRows.filter(r => r.present && !r.served);
     }
 
+    // Apply Search Filter
+    if (searchQuery) {
+      reportRows = reportRows.filter(r =>
+        r.name.toLowerCase().includes(searchQuery) ||
+        r.registration.toLowerCase().includes(searchQuery)
+      );
+    }
+
     if (reportRows.length === 0) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">
-            Nenhum registro de aluno encontrado para os filtros selecionados (${dateString}).
+          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+            Nenhum registro encontrado para os filtros selecionados.
           </td>
         </tr>
       `;
       return;
     }
 
-    tbody.innerHTML = reportRows.map(row => `
+    tbody.innerHTML = reportRows.map(row => {
+      // Determine the correct status badge
+      let statusBadge;
+      if (row.served) {
+        if (row.mealStatus === 'marmita') {
+          statusBadge = '<span class="badge" style="background: rgba(59,130,246,0.2); color: #60a5fa;">🍱 MARMITA</span>';
+        } else if (row.mealStatus === 'externa') {
+          statusBadge = '<span class="badge" style="background: rgba(168,85,247,0.2); color: #c084fc;">🛵 COMIDA EXTERNA</span>';
+        } else if (row.mealStatus === 'saude') {
+          statusBadge = '<span class="badge" style="background: rgba(239,68,68,0.2); color: #f87171;">🩺 MOTIVO DE SAÚDE</span>';
+        } else if (row.mealStatus === 'outros') {
+          const notesEscaped = (row.mealNotes || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+          statusBadge = `<span class="badge" style="background: rgba(234,179,8,0.2); color: #fde047;" title="${notesEscaped}">✍️ OUTROS: ${notesEscaped}</span>`;
+        } else {
+          statusBadge = '<span class="badge badge-success">✓ ALMOÇOU</span>';
+        }
+      } else if (row.present) {
+        statusBadge = '<span class="badge badge-danger">⚠️ PRESENTE S/ ALMOÇO</span>';
+      } else {
+        statusBadge = '<span class="badge badge-warning">⌛ PENDENTE</span>';
+      }
+
+      return `
       <tr>
         <td><strong>${row.registration}</strong></td>
         <td>${row.name}</td>
         <td>${row.gradeTurma}</td>
-        <td>${row.time} ${row.method !== '—' ? `<small style="color: var(--text-dim);">(${row.method})</small>` : ''}</td>
-        <td>
-          ${row.served 
-            ? '<span class="badge badge-success">✓ ALMOÇOU</span>' 
-            : (row.present 
-                ? '<span class="badge badge-danger">⚠️ PRESENTE S/ ALMOÇO (EXTERNA)</span>' 
-                : '<span class="badge badge-warning">⌛ PENDENTE</span>')}
-        </td>
+        <td>${row.entryTime}</td>
+        <td>${row.mealTime} ${row.method !== '—' ? `<small style="color: var(--text-dim);">(${row.method})</small>` : ''}</td>
+        <td>${statusBadge}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
   }
 
-  /**
-   * Exports historical report data as a downloadable CSV file.
-   */
+  // ========================================================================
+  //  LEGACY REPORT TABLE (compatibility alias)
+  // ========================================================================
+
+  async loadReportTable(dateString, statusFilter) {
+    return this.loadAuditTable();
+  }
+
+  // ========================================================================
+  //  AI ENGINE — AUTOMATIC DIAGNOSTIC
+  // ========================================================================
+
+  async generateAIInsights() {
+    const container = document.getElementById('ai-insights-container');
+    if (!container) return;
+
+    try {
+      const allStudents = await window.studentService.getAllStudents();
+      const activeStudents = allStudents.filter(s => s.active);
+      const totalActive = activeStudents.length;
+
+      if (totalActive === 0) {
+        container.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.5); padding: 1.5rem;">Nenhum aluno ativo cadastrado no sistema.</div>';
+        return;
+      }
+
+      const todayStr = window.mealValidatorService.getTodayDateString();
+
+      let todayEntries = [];
+      let todayMeals = [];
+      try { todayEntries = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', todayStr); } catch(e) {}
+      try { todayMeals = await window.dbEngine.getAllByIndex('meal_logs', 'date', todayStr); } catch(e) {}
+
+      const presentCount = todayEntries.length;
+      const servedCount = todayMeals.length;
+      const notServedCount = Math.max(0, presentCount - servedCount);
+      const absentCount = Math.max(0, totalActive - presentCount);
+
+      // Punctuality Analysis
+      const presenceRate = totalActive > 0 ? ((presentCount / totalActive) * 100) : 0;
+      const adhesionRate = presentCount > 0 ? ((servedCount / presentCount) * 100) : 0;
+      const evasionRate = presentCount > 0 ? ((notServedCount / presentCount) * 100) : 0;
+
+      let punctualityTag, punctualityText;
+      if (presenceRate >= 85) {
+        punctualityTag = '<span class="ai-tag ai-tag-green">✓ EXCELENTE</span>';
+        punctualityText = `A presença escolar está em <strong>${presenceRate.toFixed(1)}%</strong> — excelente nível de pontualidade. ${presentCount} de ${totalActive} alunos ativos registraram entrada na portaria.`;
+      } else if (presenceRate >= 65) {
+        punctualityTag = '<span class="ai-tag ai-tag-yellow">⚠ ATENÇÃO</span>';
+        punctualityText = `A presença está em <strong>${presenceRate.toFixed(1)}%</strong> — nível regular. ${absentCount} alunos não registraram entrada hoje. Recomenda-se investigar faltas recorrentes.`;
+      } else {
+        punctualityTag = '<span class="ai-tag ai-tag-red">✗ CRÍTICO</span>';
+        punctualityText = `A presença está em apenas <strong>${presenceRate.toFixed(1)}%</strong> — nível crítico. ${absentCount} alunos ausentes. Pode indicar problemas de transporte, calendário ou eventos externos.`;
+      }
+
+      // Nutritional Adherence Analysis
+      let nutritionTag, nutritionText;
+      if (adhesionRate >= 80) {
+        nutritionTag = '<span class="ai-tag ai-tag-green">✓ SAUDÁVEL</span>';
+        nutritionText = `A taxa de adesão ao almoço escolar é de <strong>${adhesionRate.toFixed(1)}%</strong> — ótimo indicador nutricional. ${servedCount} alunos foram servidos no refeitório.`;
+      } else if (adhesionRate >= 50) {
+        nutritionTag = '<span class="ai-tag ai-tag-yellow">⚠ MODERADO</span>';
+        nutritionText = `A taxa de adesão está em <strong>${adhesionRate.toFixed(1)}%</strong> — nível moderado. ${notServedCount} alunos presentes optaram por comida externa (iFood/marmita).`;
+      } else {
+        nutritionTag = '<span class="ai-tag ai-tag-red">✗ BAIXA ADESÃO</span>';
+        nutritionText = `Apenas <strong>${adhesionRate.toFixed(1)}%</strong> dos presentes almoçaram no refeitório — evasão alimentar alta (${evasionRate.toFixed(1)}%). Sugere-se revisão do cardápio ou pesquisa de satisfação.`;
+      }
+
+      // Auto Recommendations
+      const recommendations = [];
+      if (absentCount > totalActive * 0.3) {
+        recommendations.push('<span class="ai-tag ai-tag-red">Faltas Elevadas</span> Mais de 30% dos alunos não compareceram. Verificar ocorrência de feriado, evento ou problemas de transporte escolar.');
+      }
+      if (notServedCount > 10) {
+        recommendations.push('<span class="ai-tag ai-tag-yellow">Evasão Alimentar</span> ' + notServedCount + ' alunos presentes não almoçaram no refeitório. Considere aplicar pesquisa sobre satisfação com o cardápio.');
+      }
+      if (servedCount > 0 && adhesionRate >= 90) {
+        recommendations.push('<span class="ai-tag ai-tag-green">Cardápio Popular</span> Alta adesão indica boa aceitação do cardápio. Manter padrão atual e registrar o cardápio do dia como referência.');
+      }
+      if (presentCount > 0 && presentCount <= 20) {
+        recommendations.push('<span class="ai-tag ai-tag-blue">Dia Atípico</span> Poucos alunos registrados na portaria hoje. Verificar se há atividade extraclasse, prova ou recesso parcial.');
+      }
+      if (recommendations.length === 0) {
+        recommendations.push('<span class="ai-tag ai-tag-blue">Operação Normal</span> Todos os indicadores dentro da normalidade. Nenhuma ação urgente necessária.');
+      }
+
+      container.innerHTML = `
+        <div class="ai-insight-block">
+          <div class="ai-insight-label ai-label-punctuality">📊 Diagnóstico de Pontualidade ${punctualityTag}</div>
+          <div class="ai-insight-text">${punctualityText}</div>
+        </div>
+        <div class="ai-insight-block">
+          <div class="ai-insight-label ai-label-nutrition">🥗 Análise Nutricional (Adesão ao Almoço) ${nutritionTag}</div>
+          <div class="ai-insight-text">${nutritionText}</div>
+        </div>
+        <div class="ai-insight-block">
+          <div class="ai-insight-label ai-label-recommendation">💡 Recomendações Automáticas para a Gestão</div>
+          <div class="ai-insight-text">
+            ${recommendations.map(r => '<div style="margin-bottom: 0.5rem;">' + r + '</div>').join('')}
+          </div>
+        </div>
+      `;
+    } catch (err) {
+      console.warn('⚠️ Erro ao gerar insights de IA:', err);
+      container.innerHTML = '<div style="text-align: center; color: rgba(255,255,255,0.5); padding: 1.5rem;">Erro ao gerar análise. Tente novamente.</div>';
+    }
+  }
+
+  // ========================================================================
+  //  CSV EXPORT
+  // ========================================================================
+
   async exportReportCsv(dateString) {
     if (!dateString) dateString = window.mealValidatorService.getTodayDateString();
 
@@ -267,7 +578,7 @@ class DashboardController {
     const activeStudents = allStudents.filter(s => s.active);
 
     const mealsOnDate = await window.dbEngine.getAllByIndex('meal_logs', 'date', dateString);
-    const mealMapByReg = new Map(mealsOnDate.map(m => [m.studentRegistration, m]));
+    const mealMapByReg = new Map(mealsOnDate.map(m => [m.studentRegistration || m.student_registration, m]));
 
     let entriesOnDate = [];
     try {
