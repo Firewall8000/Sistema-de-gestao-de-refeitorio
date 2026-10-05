@@ -92,6 +92,7 @@ const frontendFiles = [
   'index.html',
   'carteirinha.html',
   'manifest.json',
+  'manifest-carteirinha.json',
   'sw.js'
 ];
 
@@ -194,6 +195,8 @@ window.SUPABASE_URL = ${JSON.stringify(cleanSupabaseUrl)};
 window.SUPABASE_ANON_KEY = ${JSON.stringify(
     supabaseAnonKey.trim()
   )};
+
+window.VAPID_PUBLIC_KEY = ${JSON.stringify((process.env.VAPID_PUBLIC_KEY || '').trim())};
 `;
 
   fs.writeFileSync(

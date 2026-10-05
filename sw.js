@@ -4,8 +4,8 @@
    ========================================================================== */
 
 const CACHE_PREFIX = 'cesd-refectory-';
-// 1. Mudamos a versão para v3.3.0 para forçar o navegador a descartar o v3.2.0 antigo
-const CACHE_NAME = `${CACHE_PREFIX}v3.3.0`;
+// 1. Mudamos a versão para v3.4.0 para forçar o navegador a descartar o cache antigo
+const CACHE_NAME = `${CACHE_PREFIX}v3.4.0`;
 
 const ASSETS_TO_CACHE = [
   './',
@@ -88,3 +88,34 @@ self.addEventListener('fetch', (event) => {
       })
   );
 });
+
+// 4. Push: lembrete de almoço (fica na tela até o aluno tocar; vibra a cada reenvio)
+self.addEventListener('push', (event) => {
+  let d = {};
+  try { d = event.data ? event.data.json() : {}; } catch (e) {}
+  event.waitUntil(
+    self.registration.showNotification(d.title || 'Você ainda não almoçou 🍽️', {
+      body: d.body || 'Toque para informar o motivo.',
+      icon: './assets/img/logo.png',
+      badge: './assets/img/logo.png',
+      vibrate: [300, 100, 300, 100, 500],
+      tag: 'almoco-lembrete',
+      renotify: true,
+      requireInteraction: true,
+      data: { url: d.url || '/carteirinha.html?justificar=1' }
+    })
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || '/carteirinha.html?justificar=1';
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if ('focus' in c) { c.navigate(url); return c.focus(); }
+      }
+      return clients.openWindow(url);
+    })
+  );
+});

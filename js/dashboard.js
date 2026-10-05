@@ -34,6 +34,11 @@ class DashboardController {
             this.refreshDashboardForPeriod();
           })
           .subscribe();
+
+        // Justificativas não têm Realtime (tabela protegida): atualiza a cada 30 s
+        setInterval(() => {
+          if (!document.hidden && document.getElementById('report-table-body')) this.loadAuditTable();
+        }, 30000);
       } catch (err) {
         console.warn('⚠️ Erro ao assinar Supabase Realtime no Dashboard:', err);
       }
@@ -349,6 +354,29 @@ class DashboardController {
   //  AUDIT TABLE (Dashboard)
   // ========================================================================
 
+  _esc(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  _justBadge(j) {
+    const t = j.created_at ? new Date(j.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+    const hora = t ? ` <small>(${t})</small>` : '';
+    const map = {
+      marmita:   ['rgba(59,130,246,0.2)', '#60a5fa', '🍱 MARMITA'],
+      externa:   ['rgba(168,85,247,0.2)', '#c084fc', '🛵 COMIDA EXTERNA (iFood/familiar)'],
+      a_caminho: ['rgba(34,197,94,0.2)',  '#4ade80', '🚶 A CAMINHO DO REFEITÓRIO'],
+      saude:     ['rgba(239,68,68,0.2)',  '#f87171', '🩺 MOTIVO DE SAÚDE']
+    };
+    if (j.motivo === 'outros') {
+      const n = this._esc(j.notes || '');
+      return `<span class="badge" style="background: rgba(234,179,8,0.2); color: #fde047;" title="${n}">✍️ OUTROS: ${n}${hora}</span>`;
+    }
+    const m = map[j.motivo] || ['rgba(148,163,184,0.2)', '#cbd5e1', this._esc(j.motivo)];
+    return `<span class="badge" style="background: ${m[0]}; color: ${m[1]};">${m[2]}${hora}</span>`;
+  }
+
   async loadAuditTable() {
     const tbody = document.getElementById('report-table-body');
     if (!tbody) return;
@@ -374,6 +402,15 @@ class DashboardController {
       if (sId) entryMapByStudentId.set(sId, e);
     });
 
+    // Justificativas do dia (alunos que informaram por que não almoçaram)
+    const justMap = new Map();
+    try {
+      if (window.supabaseClient && navigator.onLine) {
+        const { data } = await window.supabaseClient.rpc('list_justifications_today');
+        (data || []).forEach(j => justMap.set(j.student_registration, j));
+      }
+    } catch (e) {}
+
     let reportRows = activeStudents.map(student => {
       const meal = mealMapByReg.get(student.registration);
       const entry = entryMapByStudentId.get(student.id);
@@ -389,7 +426,8 @@ class DashboardController {
         mealTime: meal ? window.mealValidatorService.formatTimeString(meal.timestamp) : '—',
         method: meal ? (meal.validationMethod || meal.validation_method) : '—',
         mealStatus: meal ? (meal.mealStatus || meal.meal_status || null) : null,
-        mealNotes: meal ? (meal.notes || null) : null
+        mealNotes: meal ? (meal.notes || null) : null,
+        just: justMap.get(student.registration) || null
       };
     });
 
@@ -437,6 +475,8 @@ class DashboardController {
         } else {
           statusBadge = '<span class="badge badge-success">✓ ALMOÇOU</span>';
         }
+      } else if (row.just) {
+        statusBadge = this._justBadge(row.just);
       } else if (row.present) {
         statusBadge = '<span class="badge badge-danger">⚠️ PRESENTE S/ ALMOÇO</span>';
       } else {
@@ -445,9 +485,9 @@ class DashboardController {
 
       return `
       <tr>
-        <td><strong>${row.registration}</strong></td>
-        <td>${row.name}</td>
-        <td>${row.gradeTurma}</td>
+        <td><strong>${this._esc(row.registration)}</strong></td>
+        <td>${this._esc(row.name)}</td>
+        <td>${this._esc(row.gradeTurma)}</td>
         <td>${row.entryTime}</td>
         <td>${row.mealTime} ${row.method !== '—' ? `<small style="color: var(--text-dim);">(${row.method})</small>` : ''}</td>
         <td>${statusBadge}</td>

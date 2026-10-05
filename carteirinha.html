@@ -419,6 +419,11 @@
     </div>
 
     <!-- LUNCH REMINDER CARD (Vibra Call + Justificativa) -->
+    <div id="push-enable-card" style="display: none; margin-top: 0.5rem;">
+      <button type="button" id="btn-enable-push" class="btn btn-secondary btn-sm" style="width: 100%;">🔔 Ativar avisos do almoço</button>
+      <p id="push-status" style="font-size: 0.75rem; opacity: 0.8; margin: 0.35rem 0 0;"></p>
+    </div>
+
     <div id="lunch-reminder-card" style="display: none; margin-top: 0.5rem;">
       <div class="card" style="border: 2px solid rgba(245, 158, 11, 0.5); background: linear-gradient(145deg, rgba(245, 158, 11, 0.12) 0%, rgba(234, 88, 12, 0.08) 100%); border-radius: 16px; padding: 1.25rem; animation: feedSlideIn 0.4s ease;">
         
@@ -733,6 +738,7 @@
 
         // Initialize Lunch Reminder System
         initLunchReminder(student);
+        initPushUI(student);
       }
 
       // ================================================================
@@ -767,16 +773,93 @@
 
         if (window.supabaseClient && navigator.onLine) {
           try {
-            const { data, error } = await window.supabaseClient
-              .from('meal_logs')
-              .select('id')
-              .eq('student_registration', registration)
-              .eq('date', getTodayStr())
-              .maybeSingle();
-            if (!error && data) return true;
+            const saved = JSON.parse(localStorage.getItem('cesd_student_card') || '{}');
+            const { data, error } = await window.supabaseClient.rpc('student_has_record_today', {
+              p_registration: registration,
+              p_device_id: saved.bound_device_id || ''
+            });
+            if (!error && data === true) return true;
           } catch (e) {}
         }
         return false;
+      }
+
+      // ================================================================
+      //  PUSH NOTIFICATIONS (avisos com o app fechado)
+      // ================================================================
+      const FORCE_JUSTIFY = new URLSearchParams(location.search).has('justificar');
+
+      function urlB64ToUint8Array(b64) {
+        const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+        const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+        return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+      }
+
+      async function subscribeAndSave(student) {
+        if (!window.VAPID_PUBLIC_KEY) throw new Error('Chave de avisos não configurada.');
+        const reg = await navigator.serviceWorker.ready;
+        const sub = (await reg.pushManager.getSubscription()) ||
+          (await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlB64ToUint8Array(window.VAPID_PUBLIC_KEY)
+          }));
+        const j = sub.toJSON();
+        const platform = /iPad|iPhone|iPod/.test(navigator.userAgent) ? 'ios' : 'android/outros';
+        const { data, error } = await window.supabaseClient.rpc('register_push_subscription', {
+          p_registration: student.registration,
+          p_device_id: student.bound_device_id || '',
+          p_endpoint: j.endpoint,
+          p_p256dh: j.keys.p256dh,
+          p_auth: j.keys.auth,
+          p_platform: platform
+        });
+        if (error || data !== true) throw new Error(error ? error.message : 'Aparelho não validado.');
+      }
+
+      async function initPushUI(student) {
+        const box = document.getElementById('push-enable-card');
+        const btn = document.getElementById('btn-enable-push');
+        const status = document.getElementById('push-status');
+        if (!box || !btn || !status) return;
+
+        const iosDevice = /iPad|iPhone|iPod/.test(navigator.userAgent);
+        const installed = window.navigator.standalone || window.matchMedia('(display-mode: standalone)').matches;
+        const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+        box.style.display = 'block';
+        if (iosDevice && !installed) {
+          btn.style.display = 'none';
+          status.textContent = 'No iPhone: toque em Compartilhar › Adicionar à Tela de Início e abra por lá para ativar os avisos.';
+          return;
+        }
+        if (!supported) {
+          btn.style.display = 'none';
+          status.textContent = 'Este navegador não suporta avisos.';
+          return;
+        }
+        if (Notification.permission === 'denied') {
+          btn.style.display = 'none';
+          status.textContent = 'Avisos bloqueados. Libere nas configurações do navegador/aplicativo.';
+          return;
+        }
+        if (Notification.permission === 'granted') {
+          try { await subscribeAndSave(student); btn.style.display = 'none'; status.textContent = 'Avisos do almoço ativados ✓'; }
+          catch (e) { status.textContent = 'Não foi possível ativar: ' + e.message; }
+          return;
+        }
+        btn.style.display = 'block';
+        btn.onclick = async () => {
+          btn.disabled = true;
+          try {
+            const perm = await Notification.requestPermission();
+            if (perm !== 'granted') { status.textContent = 'Permissão negada. Sem ela você não receberá o lembrete.'; return; }
+            await subscribeAndSave(student);
+            btn.style.display = 'none';
+            status.textContent = 'Avisos do almoço ativados ✓';
+          } catch (e) {
+            status.textContent = 'Não foi possível ativar: ' + e.message;
+          } finally { btn.disabled = false; }
+        };
       }
 
       let lunchReminderInterval = null;
@@ -802,7 +885,7 @@
 
       async function checkAndTriggerReminder(student) {
         if (lunchReminderTriggered) return;
-        if (!isLunchReminderWindow()) return;
+        if (!isLunchReminderWindow() && !FORCE_JUSTIFY) return;
 
         const alreadyLunched = await hasStudentLunchedToday(student.registration);
         if (alreadyLunched) return;
@@ -872,20 +955,6 @@
             return;
           }
 
-          // If 'a_caminho', just dismiss with encouragement
-          if (selectedMotivo === 'a_caminho') {
-            const reminderCard = document.getElementById('lunch-reminder-card');
-            if (reminderCard) reminderCard.style.display = 'none';
-            const successCard = document.getElementById('justif-success-card');
-            const successTitle = document.getElementById('justif-success-title');
-            const successText = document.getElementById('justif-success-text');
-            if (successTitle) successTitle.textContent = 'Corra que dá tempo!';
-            if (successText) successText.textContent = 'O refeitório atende até 12:45. Bom almoço! 🍽️';
-            if (successCard) successCard.style.display = 'block';
-            if ('vibrate' in navigator) navigator.vibrate([100]);
-            return;
-          }
-
           // If 'outros', validate text field
           const notesText = (inputOutros ? inputOutros.value.trim() : '');
           if (selectedMotivo === 'outros' && !notesText) {
@@ -900,26 +969,24 @@
           btnEnviar.textContent = '⏳ Enviando...';
 
           try {
-            // Build record
-            const record = {
-              student_id: student.id,
-              student_registration: student.registration,
-              student_name: student.name,
-              turma: student.turma || '',
-              grade: student.grade || '',
-              date: getTodayStr(),
-              meal_status: selectedMotivo,
-              notes: selectedMotivo === 'outros' ? notesText : null,
-              validation_method: 'app_auto_declaracao',
-              qr_token_used: student.qrToken || null,
-              timestamp: new Date().toISOString()
-            };
-
-            // Save to Supabase
-            if (window.supabaseClient && navigator.onLine) {
-              const { error } = await window.supabaseClient
-                .from('meal_logs')
-                .insert(record);
+            // Save to Supabase via RPC
+            if (!window.supabaseClient || !navigator.onLine) {
+              justifError.textContent = 'Sem conexão. Conecte-se à internet para enviar.';
+              justifError.style.display = 'block';
+              return;
+            }
+            {
+              const { data: okRpc, error } = await window.supabaseClient.rpc('submit_justification', {
+                p_registration: student.registration,
+                p_device_id: student.bound_device_id || '',
+                p_motivo: selectedMotivo,
+                p_notes: selectedMotivo === 'outros' ? notesText : null
+              });
+              if (!error && okRpc !== true) {
+                justifError.textContent = 'Não foi possível validar este aparelho. Procure a secretaria.';
+                justifError.style.display = 'block';
+                return;
+              }
               if (error) {
                 console.warn('⚠️ Erro ao gravar justificativa no Supabase:', error.message);
                 justifError.textContent = 'Erro ao enviar: ' + error.message;
@@ -942,8 +1009,9 @@
             const successCard = document.getElementById('justif-success-card');
             const successTitle = document.getElementById('justif-success-title');
             const successText = document.getElementById('justif-success-text');
-            if (successTitle) successTitle.textContent = '✓ Justificativa registrada!';
-            if (successText) successText.textContent = 'A diretoria foi informada.';
+            const aCaminho = selectedMotivo === 'a_caminho';
+            if (successTitle) successTitle.textContent = aCaminho ? 'Corra que dá tempo!' : '✓ Justificativa registrada!';
+            if (successText) successText.textContent = aCaminho ? 'O refeitório atende até 12:45. Bom almoço! 🍽️' : 'A diretoria foi informada.';
             if (successCard) successCard.style.display = 'block';
 
           } catch (err) {
