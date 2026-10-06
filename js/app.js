@@ -171,6 +171,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (searchInput) searchInput.addEventListener('input', () => renderStudentsTable());
   if (gradeFilter) gradeFilter.addEventListener('change', () => renderStudentsTable());
   if (turmaFilter) turmaFilter.addEventListener('change', () => renderStudentsTable());
+  initBadgeBatchPrint();
 
   // Modal Open / Close Controls
   const modalStudent = document.getElementById('modal-student');
@@ -510,7 +511,7 @@ async function renderStudentsTable() {
   if (students.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
           Nenhum aluno encontrado para a busca.
         </td>
       </tr>
@@ -520,6 +521,7 @@ async function renderStudentsTable() {
 
   tbody.innerHTML = students.map(s => `
     <tr>
+      <td><input type="checkbox" class="badge-select" data-id="${s.id}" ${selectedBadgeIds.has(s.id) ? 'checked' : ''}></td>
       <td><strong>${s.registration}</strong></td>
       <td>${s.name}</td>
       <td>${s.grade} — ${s.turma}</td>
@@ -543,6 +545,89 @@ async function renderStudentsTable() {
       </td>
     </tr>
   `).join('');
+
+  currentListedIds = students.map(s => s.id);
+  updateBadgeSelectionUI();
+}
+
+// ---- Seleção de crachás para impressão em lote (A4) ----
+const selectedBadgeIds = new Set();
+let currentListedIds = [];
+
+function updateBadgeSelectionUI() {
+  const n = selectedBadgeIds.size;
+  const btn = document.getElementById('btn-print-selected-badges');
+  const count = document.getElementById('selected-badges-count');
+  const clear = document.getElementById('btn-clear-selected-badges');
+  const all = document.getElementById('select-all-badges');
+  if (btn) btn.disabled = n === 0;
+  if (clear) clear.style.display = n > 0 ? 'inline-flex' : 'none';
+  if (count) {
+    const folhas = Math.ceil(n / 4);
+    count.textContent = n === 0
+      ? 'Nenhum aluno selecionado'
+      : `${n} selecionado(s) • ${folhas} folha(s) A4`;
+  }
+  if (all) {
+    const listed = currentListedIds.length;
+    const marked = currentListedIds.filter(id => selectedBadgeIds.has(id)).length;
+    all.checked = listed > 0 && marked === listed;
+    all.indeterminate = marked > 0 && marked < listed;
+  }
+}
+
+function initBadgeBatchPrint() {
+  const tbody = document.getElementById('students-table-body');
+  const all = document.getElementById('select-all-badges');
+  const btn = document.getElementById('btn-print-selected-badges');
+  const clear = document.getElementById('btn-clear-selected-badges');
+  if (!tbody || !btn) return;
+
+  tbody.addEventListener('change', (e) => {
+    const cb = e.target.closest('.badge-select');
+    if (!cb) return;
+    if (cb.checked) selectedBadgeIds.add(cb.dataset.id); else selectedBadgeIds.delete(cb.dataset.id);
+    updateBadgeSelectionUI();
+  });
+
+  if (all) all.addEventListener('change', () => {
+    currentListedIds.forEach(id => { if (all.checked) selectedBadgeIds.add(id); else selectedBadgeIds.delete(id); });
+    tbody.querySelectorAll('.badge-select').forEach(cb => { cb.checked = all.checked; });
+    updateBadgeSelectionUI();
+  });
+
+  if (clear) clear.addEventListener('click', () => {
+    selectedBadgeIds.clear();
+    tbody.querySelectorAll('.badge-select').forEach(cb => { cb.checked = false; });
+    updateBadgeSelectionUI();
+  });
+
+  btn.addEventListener('click', async () => {
+    const students = [];
+    for (const id of selectedBadgeIds) {
+      const st = await window.dbEngine.get('students', id);
+      if (st) students.push(st);
+    }
+    students.sort((a, b) =>
+      String(a.grade).localeCompare(String(b.grade), 'pt-BR') ||
+      String(a.turma).localeCompare(String(b.turma), 'pt-BR') ||
+      String(a.name).localeCompare(String(b.name), 'pt-BR'));
+
+    const printable = students.filter(st => st.qrToken);
+    const skipped = students.length - printable.length;
+    if (printable.length === 0) {
+      await showAlertModal({ title: 'Nada para imprimir', message: 'Os alunos selecionados não possuem QR Code disponível neste dispositivo.', type: 'danger' });
+      return;
+    }
+    const result = window.qrBadgeGenerator.printBadges(printable);
+    if (result === null) {
+      await showAlertModal({ title: 'Pop-up bloqueado', message: 'Permita pop-ups para este site e clique em imprimir novamente.', type: 'danger' });
+      return;
+    }
+    if (skipped > 0) {
+      await showAlertModal({ title: 'Alguns alunos ficaram de fora', message: `${skipped} aluno(s) selecionado(s) não têm QR Code disponível neste dispositivo e não foram incluídos.`, type: 'info' });
+    }
+  });
 }
 
 async function confirmResetStudentDevice(id, name) {

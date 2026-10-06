@@ -213,11 +213,19 @@
           </div>
         </div>
 
+        <!-- Impressão de crachás em lote (A4, 4 por folha) -->
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.75rem;">
+          <button type="button" id="btn-print-selected-badges" class="btn btn-primary btn-sm" disabled>🖨️ Imprimir selecionados (A4 — 4 por folha)</button>
+          <span id="selected-badges-count" style="font-size: 0.85rem; color: var(--text-muted);">Nenhum aluno selecionado</span>
+          <button type="button" id="btn-clear-selected-badges" class="btn btn-secondary btn-sm" style="display: none;">Limpar seleção</button>
+        </div>
+
         <!-- Students Table -->
         <div class="table-responsive">
           <table class="data-table">
             <thead>
               <tr>
+                <th style="width: 2rem;"><input type="checkbox" id="select-all-badges" title="Selecionar todos os alunos listados"></th>
                 <th>Matrícula</th>
                 <th>Nome Completo</th>
                 <th>Série / Turma</th>
@@ -227,7 +235,7 @@
             </thead>
             <tbody id="students-table-body">
               <tr>
-                <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
                   Carregando lista de alunos...
                 </td>
               </tr>
