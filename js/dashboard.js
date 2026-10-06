@@ -253,20 +253,51 @@ class DashboardController {
   }
 
   async refreshTvFeed() {
-    if (!window.dbEngine || !window.mealValidatorService) return;
-
-    const todayStr = window.mealValidatorService.getTodayDateString();
+    const todayStr = window.mealValidatorService 
+      ? window.mealValidatorService.getTodayDateString() 
+      : new Date().toISOString().split('T')[0];
 
     let todayEntries = [];
     let todayMeals = [];
     let allStudents = [];
 
-    try {
-      todayEntries = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', todayStr);
-    } catch (e) {}
-    try {
-      todayMeals = await window.dbEngine.getAllByIndex('meal_logs', 'date', todayStr);
-    } catch (e) {}
+    // 1. BUSCA EM TEMPO REAL DIRETO DO SUPABASE (NUVEM)
+    if (window.supabaseClient && navigator.onLine) {
+      try {
+        // Busca entradas da portaria de hoje (mais recentes primeiro)
+        const { data: entriesData } = await window.supabaseClient
+          .from('school_entries')
+          .select('*')
+          .eq('entry_date', todayStr)
+          .order('entry_time', { ascending: false });
+
+        if (entriesData) todayEntries = entriesData;
+
+        // Busca refeições do refeitório de hoje (mais recentes primeiro)
+        const { data: mealsData } = await window.supabaseClient
+          .from('meal_logs')
+          .select('*')
+          .eq('date', todayStr)
+          .order('timestamp', { ascending: false });
+
+        if (mealsData) todayMeals = mealsData;
+      } catch (err) {
+        console.warn('⚠️ Falha ao buscar feed da TV no Supabase:', err);
+      }
+    }
+
+    // 2. FALLBACK PARA O BANCO LOCAL (apenas se estiver offline)
+    if (todayEntries.length === 0 && window.dbEngine) {
+      try {
+        todayEntries = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', todayStr);
+      } catch (e) {}
+    }
+    if (todayMeals.length === 0 && window.dbEngine) {
+      try {
+        todayMeals = await window.dbEngine.getAllByIndex('meal_logs', 'date', todayStr);
+      } catch (e) {}
+    }
+
     try {
       allStudents = await window.studentService.getAllStudents();
     } catch (e) {}
@@ -274,7 +305,7 @@ class DashboardController {
     const studentMap = new Map(allStudents.map(s => [s.id, s]));
     const studentMapByReg = new Map(allStudents.map(s => [s.registration, s]));
 
-    // Counters
+    // Contadores da TV
     const presentCount = todayEntries.length;
     const servedCount = todayMeals.length;
     const waitingCount = Math.max(0, presentCount - servedCount);
@@ -291,21 +322,17 @@ class DashboardController {
     if (elPortariaTotal) elPortariaTotal.textContent = presentCount;
     if (elRefTotal) elRefTotal.textContent = servedCount;
 
-    // Portaria Feed (sorted by most recent first)
+    // Feed da Portaria (ordem decrescente de chegada)
     const portariaList = document.getElementById('tv-feed-portaria-list');
     if (portariaList) {
-      const sorted = [...todayEntries].sort((a, b) => {
-        return new Date(b.entry_time || b.entryTime).getTime() - new Date(a.entry_time || a.entryTime).getTime();
-      });
-
-      if (sorted.length === 0) {
+      if (todayEntries.length === 0) {
         portariaList.innerHTML = '<div class="tv-feed-empty">Nenhum registro de entrada hoje</div>';
       } else {
-        portariaList.innerHTML = sorted.map((entry, idx) => {
+        portariaList.innerHTML = todayEntries.map((entry, idx) => {
           const sId = entry.student_id || entry.studentId;
           const sObj = studentMap.get(sId);
           const name = entry.student_name || (sObj ? sObj.name : 'Aluno');
-          const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : '';
+          const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (entry.turma || '');
           const time = window.mealValidatorService.formatTimeString(entry.entry_time || entry.entryTime);
           return `
             <div class="tv-feed-item ${idx === 0 ? 'tv-feed-item-new' : ''}">
@@ -320,21 +347,17 @@ class DashboardController {
       }
     }
 
-    // Refeitório Feed (sorted by most recent first)
+    // Feed do Refeitório (ordem decrescente de refeição)
     const refList = document.getElementById('tv-feed-refeitorio-list');
     if (refList) {
-      const sortedMeals = [...todayMeals].sort((a, b) => {
-        return new Date(b.timestamp || b.created_at).getTime() - new Date(a.timestamp || a.created_at).getTime();
-      });
-
-      if (sortedMeals.length === 0) {
+      if (todayMeals.length === 0) {
         refList.innerHTML = '<div class="tv-feed-empty">Nenhum almoço registrado hoje</div>';
       } else {
-        refList.innerHTML = sortedMeals.map((meal, idx) => {
+        refList.innerHTML = todayMeals.map((meal, idx) => {
           const reg = meal.studentRegistration || meal.student_registration;
           const sObj = studentMapByReg.get(reg);
           const name = meal.studentName || (sObj ? sObj.name : 'Aluno');
-          const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : '';
+          const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (meal.turma || '');
           const time = window.mealValidatorService.formatTimeString(meal.timestamp || meal.created_at);
           return `
             <div class="tv-feed-item ${idx === 0 ? 'tv-feed-item-new' : ''}">
