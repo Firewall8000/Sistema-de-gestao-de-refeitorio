@@ -394,6 +394,34 @@ class MealValidatorService {
       return false;
     }
 
+    // Verificação obrigatória: o aluno precisa ter entrada registrada na portaria hoje
+    // (school_entries.entry_date === todayStr). Busca no Supabase com fallback no IndexedDB.
+    const todayStr = this.getTodayDateString();
+    const gateEntry = await this.getTodayEntryForStudent(student.id);
+    const hasGateEntry = !!gateEntry && (gateEntry.entry_date || gateEntry.entryDate || todayStr) === todayStr;
+
+    if (!hasGateEntry) {
+      // displayValidationResult com success:false toca o áudio de erro
+      this.displayValidationResult({
+        success: false,
+        title: 'ENTRADA NÃO REGISTRADA NA PORTARIA',
+        detail: `${student.name} — ${student.grade} (${student.turma})`,
+        sub: 'O aluno não registrou entrada na portaria hoje. Almoço bloqueado.'
+      });
+      if (!document.getElementById('validation-banner') && window.audioFeedback) {
+        window.audioFeedback.playErrorSound();
+      }
+
+      if (typeof window.showAlertModal === 'function') {
+        await window.showAlertModal({
+          title: 'Entrada não registrada na portaria',
+          message: `A entrada de ${student.name} não foi registrada na portaria hoje.\n\nO almoço só pode ser liberado após o registro de entrada na portaria.`,
+          type: 'danger'
+        });
+      }
+      return { success: false, reason: 'no_gate_entry' };
+    }
+
     // Single-meal check & unique_student_meal_per_date error handling
     const existingMeal = await this.getTodayMealForStudent(student.registration);
 
