@@ -689,7 +689,27 @@ class DashboardController {
     }
   }
 
+  /**
+   * Converte o logotipo da escola em Data URL (Base64) para embutir no documento Word.
+   */
+  async _getLogoBase64() {
+    try {
+      const response = await fetch('assets/img/logo.png');
+      const blob = await response.blob();
+      return await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result || '');
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.warn('⚠️ Falha ao carregar logo em Base64:', e);
+      return '';
+    }
+  }
+
   async exportWordReport() {
+    const logoDataUrl = await this._getLogoBase64();
     const period = this.currentPeriod || 'today';
     const { start, end, label, slug } = this._localPeriodRange(period);
     const esc = (v) => this._esc(v);
@@ -827,12 +847,18 @@ class DashboardController {
 <div class="WordSection1">
 
   <table style="width: 100%; border-bottom: 3px solid #1e3a8a; margin-bottom: 10px;">
-    <tr><td style="text-align: center; padding-bottom: 8px;">
-      <p style="margin: 0; font-size: 10pt; color: #475569; text-transform: uppercase; letter-spacing: 1px;">Governo do Estado de Sergipe • SEDUC</p>
-      <p style="margin: 2px 0; font-size: 15pt; font-weight: bold; color: #1e3a8a;">Centro de Excelência Santos Dumont (CESD)</p>
-      <p style="margin: 0; font-size: 12.5pt; font-weight: bold;">Relatório Executivo de Assiduidade e Alimentação Escolar</p>
-      <p style="margin: 4px 0 0; font-size: 9.5pt; color: #64748b;">Período: <b>${label}</b> (${periodText}) • Gerado em ${generatedAt}</p>
-    </td></tr>
+    <tr>
+      <td style="width: 75px; text-align: left; vertical-align: middle; padding-bottom: 8px;">
+        <img src="${logoDataUrl}" width="65" height="65">
+      </td>
+      <td style="text-align: center; vertical-align: middle; padding-bottom: 8px;">
+        <p style="margin: 0; font-size: 10pt; color: #475569; text-transform: uppercase; letter-spacing: 1px;">Governo do Estado de Sergipe • SEDUC</p>
+        <p style="margin: 2px 0; font-size: 15pt; font-weight: bold; color: #1e3a8a;">Centro de Excelência Santos Dumont (CESD)</p>
+        <p style="margin: 0; font-size: 12.5pt; font-weight: bold;">Relatório Executivo de Assiduidade e Alimentação Escolar</p>
+        <p style="margin: 4px 0 0; font-size: 9.5pt; color: #64748b;">Período: <b>${label}</b> (${periodText}) • Gerado em ${generatedAt}</p>
+      </td>
+      <td style="width: 75px; padding-bottom: 8px;"></td>
+    </tr>
   </table>
 
   <p style="font-size: 11.5pt; font-weight: bold; color: #1e3a8a; margin: 12px 0 4px;">📊 Visão Geral do Período</p>
