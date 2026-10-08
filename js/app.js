@@ -330,7 +330,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Report Status Filter & Audit Search
   const reportStatusFilter = document.getElementById('report-filter-status');
   const auditSearch = document.getElementById('audit-search');
-  const btnExportCsv = document.getElementById('btn-export-csv');
+  const btnExportReport = document.getElementById('btn-export-report');
 
   if (reportStatusFilter) {
     reportStatusFilter.addEventListener('change', () => refreshDashboardView());
@@ -338,10 +338,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (auditSearch) {
     auditSearch.addEventListener('input', () => refreshDashboardView());
   }
-  if (btnExportCsv) {
-    btnExportCsv.addEventListener('click', () => {
-      const dateVal = window.mealValidatorService ? window.mealValidatorService.getTodayDateString() : '';
-      window.dashboardController.exportReportCsv(dateVal);
+  if (btnExportReport) {
+    btnExportReport.addEventListener('click', () => {
+      window.dashboardController.exportWordReport();
     });
   }
 

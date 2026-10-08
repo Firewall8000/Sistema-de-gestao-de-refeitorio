@@ -628,41 +628,267 @@ class DashboardController {
   }
 
   // ========================================================================
-  //  CSV EXPORT
+  //  RELATÓRIO EXECUTIVO (WORD .doc)
   // ========================================================================
 
-  async exportReportCsv(dateString) {
-    if (!dateString) dateString = window.mealValidatorService.getTodayDateString();
+  /**
+   * Classifica o horário de chegada na portaria.
+   * < 07:00:00 verde | 07:00:00–07:15:59 amarelo | >= 07:16:00 vermelho
+   */
+  _classifyArrival(entryTime) {
+    const d = new Date(entryTime);
+    const secs = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+    if (secs < 7 * 3600) {
+      return { key: 'early', bg: '#dcfce7', fg: '#166534', label: 'Antecipado / Pontual' };
+    }
+    if (secs < 7 * 3600 + 16 * 60) {
+      return { key: 'tolerance', bg: '#fef9c3', fg: '#854d0e', label: 'Tolerância 15min' };
+    }
+    return { key: 'late', bg: '#fee2e2', fg: '#991b1b', label: 'Atrasado' };
+  }
 
+  /** Datas do período em horário LOCAL (YYYY-MM-DD). */
+  _localPeriodRange(period) {
+    const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const now = new Date();
+    const end = fmt(now);
+    if (period === 'week') {
+      const dow = now.getDay();
+      const monday = new Date(now);
+      monday.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
+      return { start: fmt(monday), end, label: 'Esta Semana', slug: 'Semana' };
+    }
+    if (period === 'month') {
+      return { start: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), end, label: 'Este Mês', slug: 'Mes' };
+    }
+    return { start: end, end, label: 'Hoje', slug: 'Hoje' };
+  }
+
+  /** Busca registros de uma tabela no período: Supabase com fallback no IndexedDB. */
+  async _fetchPeriodRecords(table, dateField, start, end) {
+    if (window.supabaseClient && navigator.onLine) {
+      try {
+        const { data, error } = await window.supabaseClient
+          .from(table)
+          .select('*')
+          .gte(dateField, start)
+          .lte(dateField, end);
+        if (!error && Array.isArray(data)) return data;
+      } catch (e) {
+        console.warn(`⚠️ Falha ao buscar ${table} no Supabase. Usando banco local:`, e);
+      }
+    }
+    try {
+      const all = await window.dbEngine.getAll(table);
+      return all.filter(r => {
+        const d = r[dateField] || r.entryDate;
+        return d && d >= start && d <= end;
+      });
+    } catch (e) {
+      return [];
+    }
+  }
+
+  async exportWordReport() {
+    const period = this.currentPeriod || 'today';
+    const { start, end, label, slug } = this._localPeriodRange(period);
+    const esc = (v) => this._esc(v);
+    const fmtTime = (iso) => new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const fmtDay = (ymd) => { const [y, m, d] = String(ymd).split('-'); return `${d}/${m}`; };
+    const multiDay = start !== end;
+
+    // 1. Dados
     const allStudents = await window.studentService.getAllStudents();
     const activeStudents = allStudents.filter(s => s.active);
+    const studentById = new Map(activeStudents.map(s => [s.id, s]));
 
-    const mealsOnDate = await window.dbEngine.getAllByIndex('meal_logs', 'date', dateString);
-    const mealMapByReg = new Map(mealsOnDate.map(m => [m.studentRegistration || m.student_registration, m]));
+    const entries = await this._fetchPeriodRecords('school_entries', 'entry_date', start, end);
+    const meals = await this._fetchPeriodRecords('meal_logs', 'date', start, end);
 
-    let entriesOnDate = [];
-    try {
-      entriesOnDate = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', dateString);
-    } catch (e) {}
-    const entryStudentIds = new Set(entriesOnDate.map(e => e.student_id || e.studentId));
-
-    let csvContent = 'Matricula;Nome Completo;Serie/Turma;Presente Portaria;Status Almoco;Horario Almoco;Metodo Validacao\n';
-
-    activeStudents.forEach(s => {
-      const meal = mealMapByReg.get(s.registration);
-      const isPresent = entryStudentIds.has(s.id) || !!meal;
-      const status = meal ? 'ALMOCOU' : (isPresent ? 'PRESENTE_NAO_ALMOCOU_COMIDA_EXTERNA' : 'AUSENTE_PENDENTE');
-      const time = meal ? window.mealValidatorService.formatTimeString(meal.timestamp) : '';
-      const method = meal ? meal.validationMethod : '';
-
-      csvContent += `"${s.registration}";"${s.name}";"${s.grade} ${s.turma}";"${isPresent ? 'SIM' : 'NAO'}";"${status}";"${time}";"${method}"\n`;
+    // Refeições indexadas por (matrícula + data)
+    const mealByRegDate = new Map();
+    meals.forEach(m => {
+      const reg = m.studentRegistration || m.student_registration;
+      if (reg && m.date) mealByRegDate.set(`${reg}|${m.date}`, m);
     });
 
-    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    // Justificativas (marmita / comida externa) — disponíveis via RPC apenas para hoje
+    const justByReg = new Map();
+    if (period === 'today' && window.supabaseClient && navigator.onLine) {
+      try {
+        const { data } = await window.supabaseClient.rpc('list_justifications_today');
+        (data || []).forEach(j => justByReg.set(j.student_registration, j));
+      } catch (e) {}
+    }
+
+    // 2. Cruzamento entradas x alunos, ordenado por horário de chegada (ASC)
+    const presentRows = [];
+    const presentIds = new Set();
+    entries.forEach(e => {
+      const sId = e.student_id || e.studentId;
+      const st = studentById.get(sId);
+      const entryTime = e.entry_time || e.entryTime;
+      if (!st || !entryTime) return;
+      presentIds.add(st.id);
+      const entryDate = e.entry_date || e.entryDate;
+      presentRows.push({
+        student: st,
+        entryTime,
+        entryDate,
+        meal: mealByRegDate.get(`${st.registration}|${entryDate}`) || null
+      });
+    });
+    presentRows.sort((a, b) => new Date(a.entryTime).getTime() - new Date(b.entryTime).getTime());
+
+    const absentStudents = activeStudents
+      .filter(s => !presentIds.has(s.id))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'));
+
+    // 3. KPIs
+    const totalStudents = activeStudents.length;
+    const presentCount = presentIds.size;
+    const assiduidade = totalStudents > 0 ? (presentCount / totalStudents) * 100 : 0;
+    let early = 0, tolerance = 0, late = 0;
+    presentRows.forEach(r => {
+      const k = this._classifyArrival(r.entryTime).key;
+      if (k === 'early') early++; else if (k === 'tolerance') tolerance++; else late++;
+    });
+
+    const isExternalStatus = (s) => s === 'marmita' || s === 'externa';
+    const servedMeals = meals.filter(m => !isExternalStatus(m.meal_status || m.mealStatus));
+    const servedCount = servedMeals.length;
+    const externalFromLogs = meals.length - servedCount;
+    const externalFromJust = [...justByReg.values()].filter(j => isExternalStatus(j.motivo)).length;
+    const externalCount = externalFromLogs + externalFromJust;
+    const adesao = presentRows.length > 0 ? (servedCount / presentRows.length) * 100 : 0;
+
+    // 4. Linhas da tabela nominal
+    const tdBase = 'border: 1px solid #cbd5e1; padding: 5px 7px; font-size: 9.5pt;';
+    const rowsHtml = presentRows.map(r => {
+      const c = this._classifyArrival(r.entryTime);
+      const status = r.meal ? (r.meal.meal_status || r.meal.mealStatus) : null;
+      const just = justByReg.get(r.student.registration);
+      let situacao;
+      if (r.meal && !isExternalStatus(status)) situacao = 'Almoçou no refeitório';
+      else if (status === 'marmita' || (just && just.motivo === 'marmita')) situacao = 'Marmita';
+      else if (status === 'externa' || (just && just.motivo === 'externa')) situacao = 'Comida externa';
+      else if (just) situacao = `Justificou: ${just.motivo === 'outros' ? (just.notes || 'outros') : just.motivo}`;
+      else situacao = 'Presente — não almoçou';
+
+      const mealTime = r.meal && !isExternalStatus(status) && r.meal.timestamp ? fmtTime(r.meal.timestamp) : '—';
+      const dayPrefix = multiDay ? `${fmtDay(r.entryDate)} ` : '';
+      return `
+        <tr>
+          <td style="${tdBase}">${esc(r.student.registration)}</td>
+          <td style="${tdBase}">${esc(r.student.name)}</td>
+          <td style="${tdBase}">${esc(r.student.grade)} — ${esc(r.student.turma)}</td>
+          <td style="${tdBase} background: ${c.bg}; color: ${c.fg}; font-weight: bold;">${dayPrefix}${fmtTime(r.entryTime)}<br><span style="font-size: 8pt; font-weight: normal;">${c.label}</span></td>
+          <td style="${tdBase}">${multiDay && mealTime !== '—' ? fmtDay(r.entryDate) + ' ' : ''}${mealTime}</td>
+          <td style="${tdBase}">${esc(situacao)}</td>
+        </tr>`;
+    }).join('') + absentStudents.map(s => `
+        <tr>
+          <td style="${tdBase}">${esc(s.registration)}</td>
+          <td style="${tdBase}">${esc(s.name)}</td>
+          <td style="${tdBase}">${esc(s.grade)} — ${esc(s.turma)}</td>
+          <td style="${tdBase} color: #64748b;">Ausente / Sem registro</td>
+          <td style="${tdBase}">—</td>
+          <td style="${tdBase} color: #64748b;">Ausente / Sem registro</td>
+        </tr>`).join('');
+
+    // 5. Painel de KPIs (estilo Power BI)
+    const kpi = (title, value, sub, bg, fg) => `
+      <td style="width: 25%; padding: 6px;">
+        <div style="background: ${bg}; border: 1px solid ${fg}33; border-radius: 10px; padding: 10px 12px;">
+          <p style="margin: 0; font-size: 8.5pt; color: #475569; text-transform: uppercase;">${title}</p>
+          <p style="margin: 2px 0 0; font-size: 20pt; font-weight: bold; color: ${fg};">${value}</p>
+          <p style="margin: 0; font-size: 8.5pt; color: #64748b;">${sub}</p>
+        </div>
+      </td>`;
+
+    const generatedAt = new Date().toLocaleString('pt-BR');
+    const periodText = multiDay ? `${fmtDay(start)} a ${fmtDay(end)}/${end.slice(0, 4)}` : `${fmtDay(start)}/${start.slice(0, 4)}`;
+
+    const html = `
+<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+  <meta charset="utf-8">
+  <title>Relatório Executivo CESD</title>
+  <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+  <style>
+    @page WordSection1 { size: 21cm 29.7cm; margin: 1.6cm 1.4cm 1.6cm 1.4cm; }
+    div.WordSection1 { page: WordSection1; }
+    body { font-family: Calibri, Arial, sans-serif; color: #0f172a; }
+    h1, h2, h3 { margin: 0; }
+    table { border-collapse: collapse; }
+  </style>
+</head>
+<body>
+<div class="WordSection1">
+
+  <table style="width: 100%; border-bottom: 3px solid #1e3a8a; margin-bottom: 10px;">
+    <tr><td style="text-align: center; padding-bottom: 8px;">
+      <p style="margin: 0; font-size: 10pt; color: #475569; text-transform: uppercase; letter-spacing: 1px;">Governo do Estado de Sergipe • SEDUC</p>
+      <p style="margin: 2px 0; font-size: 15pt; font-weight: bold; color: #1e3a8a;">Centro de Excelência Santos Dumont (CESD)</p>
+      <p style="margin: 0; font-size: 12.5pt; font-weight: bold;">Relatório Executivo de Assiduidade e Alimentação Escolar</p>
+      <p style="margin: 4px 0 0; font-size: 9.5pt; color: #64748b;">Período: <b>${label}</b> (${periodText}) • Gerado em ${generatedAt}</p>
+    </td></tr>
+  </table>
+
+  <p style="font-size: 11.5pt; font-weight: bold; color: #1e3a8a; margin: 12px 0 4px;">📊 Visão Geral do Período</p>
+  <table style="width: 100%;">
+    <tr>
+      ${kpi('Alunos Matriculados', totalStudents, 'Ativos no sistema', '#eff6ff', '#1d4ed8')}
+      ${kpi('Presentes no Período', presentCount, `${assiduidade.toFixed(1)}% de assiduidade`, '#ecfeff', '#0e7490')}
+      ${kpi('Almoços Servidos', servedCount, `${adesao.toFixed(1)}% de adesão`, '#f0fdf4', '#15803d')}
+      ${kpi('Comida Externa / Marmitas', externalCount, period === 'today' ? 'Declarados pelos alunos' : 'Registros no período', '#faf5ff', '#7e22ce')}
+    </tr>
+    <tr>
+      ${kpi('Antecipados (&lt; 07:00)', early, 'Chegadas pontuais', '#dcfce7', '#166534')}
+      ${kpi('Tolerância (07:00–07:15)', tolerance, 'Dentro dos 15 min', '#fef9c3', '#854d0e')}
+      ${kpi('Atrasos (&gt; 07:15)', late, 'Após a tolerância', '#fee2e2', '#991b1b')}
+      ${kpi('Ausentes', absentStudents.length, 'Sem registro na portaria', '#f1f5f9', '#475569')}
+    </tr>
+  </table>
+
+  <p style="font-size: 11.5pt; font-weight: bold; color: #1e3a8a; margin: 16px 0 4px;">📋 Relação Nominal por Ordem de Chegada</p>
+  <p style="font-size: 8.5pt; color: #64748b; margin: 0 0 6px;">
+    Legenda (Portaria):
+    <span style="background: #dcfce7; color: #166534; padding: 1px 5px;">Antes das 07:00</span>
+    <span style="background: #fef9c3; color: #854d0e; padding: 1px 5px;">07:00 às 07:15</span>
+    <span style="background: #fee2e2; color: #991b1b; padding: 1px 5px;">A partir de 07:16</span>
+  </p>
+  <table style="width: 100%;">
+    <thead>
+      <tr style="background: #1e3a8a; color: #ffffff;">
+        <th style="border: 1px solid #1e3a8a; padding: 6px; font-size: 9.5pt; text-align: left;">Matrícula</th>
+        <th style="border: 1px solid #1e3a8a; padding: 6px; font-size: 9.5pt; text-align: left;">Nome Completo</th>
+        <th style="border: 1px solid #1e3a8a; padding: 6px; font-size: 9.5pt; text-align: left;">Série / Turma</th>
+        <th style="border: 1px solid #1e3a8a; padding: 6px; font-size: 9.5pt; text-align: left;">Horário (Portaria)</th>
+        <th style="border: 1px solid #1e3a8a; padding: 6px; font-size: 9.5pt; text-align: left;">Horário (Refeitório)</th>
+        <th style="border: 1px solid #1e3a8a; padding: 6px; font-size: 9.5pt; text-align: left;">Situação</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml || `<tr><td colspan="6" style="${tdBase} text-align: center;">Nenhum aluno ativo cadastrado.</td></tr>`}
+    </tbody>
+  </table>
+
+  <p style="font-size: 8pt; color: #94a3b8; margin-top: 14px; text-align: center;">
+    Documento gerado automaticamente pelo Sistema de Refeitório QR — CESD.
+  </p>
+</div>
+</body>
+</html>`;
+
+    const blob = new Blob(['\ufeff', html], { type: 'application/msword;charset=utf-8' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `Relatorio_Almoco_SantosDumont_${dateString}.csv`;
+    link.download = `Relatorio_Executivo_CESD_${slug}_${end}.doc`;
+    document.body.appendChild(link);
     link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(link.href), 2000);
   }
 }
 
