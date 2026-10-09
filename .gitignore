@@ -10,6 +10,7 @@ backend/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+backend/.env
 
 # SISTEMA OPERACIONAL E IDE
 .DS_Store
