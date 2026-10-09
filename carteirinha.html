@@ -455,7 +455,7 @@
         <!-- Dynamic 'Outros' Text Field -->
         <div id="container-outros-motivo" style="display: none; margin-top: 4px; margin-bottom: 0.75rem;">
           <label style="font-size: 0.8rem; color: #cbd5e1; font-weight: 600;">Outros: Descreva o motivo</label>
-          <input type="text" id="input-motivo-outros" class="form-control" placeholder="Escreva aqui por que ainda não foi almoçar..." style="margin-top: 4px; width: 100%; padding: 0.65rem; border-radius: 8px;">
+          <input type="text" id="input-motivo-outros" class="form-control" maxlength="200" placeholder="Escreva aqui por que ainda não foi almoçar..." style="margin-top: 4px; width: 100%; padding: 0.65rem; border-radius: 8px;">
         </div>
 
         <!-- Justification Error / Info -->
@@ -515,6 +515,20 @@
           .replace(/\s+/g, ' ')
           .trim();
       }
+
+      /**
+       * HTML Entity Escape helper against XSS
+       */
+      function escapeHtml(text) {
+        return String(text == null ? '' : text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+      window.escapeHtml = escapeHtml;
+      window._esc = escapeHtml;
 
       /**
        * Secure Device Fingerprint Generator (Web Crypto API - SHA-256)
@@ -715,12 +729,17 @@
         viewLogin.style.display = 'none';
         viewCard.style.display = 'flex';
 
-        document.getElementById('card-student-name').textContent = student.name || 'NOME DO ESTUDANTE';
-        document.getElementById('card-student-registration').textContent = student.registration || '—';
-        document.getElementById('card-student-grade-turma').textContent = `${student.grade || ''} — ${student.turma || ''}`;
+        const safeName = student && student.name ? escapeHtml(student.name.trim()) : 'NOME DO ESTUDANTE';
+        const safeReg = student && student.registration ? escapeHtml(student.registration.trim()) : '—';
+        const safeGrade = student && student.grade ? escapeHtml(student.grade.trim()) : '';
+        const safeTurma = student && student.turma ? escapeHtml(student.turma.trim()) : '';
+
+        document.getElementById('card-student-name').textContent = safeName;
+        document.getElementById('card-student-registration').textContent = safeReg;
+        document.getElementById('card-student-grade-turma').textContent = safeGrade && safeTurma ? `${safeGrade} — ${safeTurma}` : (safeGrade || safeTurma || '—');
 
         // Render 3x4 Photo or Pending Silhouette
-        renderPhoto3x4(student.photo_url);
+        renderPhoto3x4(student ? student.photo_url : null);
 
         // Render High-Contrast QR Code
         const qrBox = document.getElementById('qrcode-box');
@@ -956,12 +975,18 @@
           }
 
           // If 'outros', validate text field
-          const notesText = (inputOutros ? inputOutros.value.trim() : '');
-          if (selectedMotivo === 'outros' && !notesText) {
-            justifError.textContent = 'Por favor, descreva brevemente o motivo no campo acima.';
-            justifError.style.display = 'block';
-            if (inputOutros) inputOutros.focus();
-            return;
+          let notesText = (inputOutros ? inputOutros.value.trim() : '');
+          if (selectedMotivo === 'outros') {
+            if (!notesText) {
+              justifError.textContent = 'Por favor, descreva brevemente o motivo no campo acima.';
+              justifError.style.display = 'block';
+              if (inputOutros) inputOutros.focus();
+              return;
+            }
+            if (notesText.length > 200) {
+              notesText = notesText.substring(0, 200).trim();
+            }
+            notesText = escapeHtml(notesText);
           }
 
           // Disable button during submission
@@ -1031,11 +1056,16 @@
         const container = document.getElementById('photo-3x4-container');
         if (!container) return;
 
-        if (photoUrl && photoUrl.trim() !== '') {
-          container.innerHTML = `<img src="${photoUrl.trim()}" alt="Foto do Aluno" class="photo-3x4-img" onerror="this.onerror=null; renderPhotoPendingPlaceholder();">`;
-        } else {
-          renderPhotoPendingPlaceholder();
+        if (photoUrl && typeof photoUrl === 'string') {
+          const cleanUrl = photoUrl.trim();
+          const isSafeUrl = cleanUrl.startsWith('https://') || cleanUrl.startsWith('data:image/');
+          if (isSafeUrl) {
+            const safePhotoUrl = escapeHtml(cleanUrl);
+            container.innerHTML = `<img src="${safePhotoUrl}" alt="Foto do Aluno" class="photo-3x4-img" onerror="this.onerror=null; renderPhotoPendingPlaceholder();">`;
+            return;
+          }
         }
+        renderPhotoPendingPlaceholder();
       }
 
       function renderPhotoPendingPlaceholder() {

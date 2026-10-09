@@ -216,12 +216,12 @@ class DashboardController {
       return `
         <tr>
           <td style="text-align: center;">
-            <span class="badge ${idx < 3 ? 'badge-warning' : 'badge-info'}" style="font-weight: 800;">${positionStr}</span>
+            <span class="badge ${idx < 3 ? 'badge-warning' : 'badge-info'}" style="font-weight: 800;">${this._esc(positionStr)}</span>
           </td>
-          <td><strong>${row.studentRegistration}</strong></td>
-          <td>${row.studentName}</td>
-          <td>${row.gradeTurma}</td>
-          <td>${timeFormatted}</td>
+          <td><strong>${this._esc(row.studentRegistration)}</strong></td>
+          <td>${this._esc(row.studentName)}</td>
+          <td>${this._esc(row.gradeTurma)}</td>
+          <td>${this._esc(timeFormatted)}</td>
           <td><span class="badge badge-warning">⌛ Aguardando Almoço</span></td>
         </tr>
       `;
@@ -331,9 +331,14 @@ class DashboardController {
         portariaList.innerHTML = todayEntries.map((entry, idx) => {
           const sId = entry.student_id || entry.studentId;
           const sObj = studentMap.get(sId);
-          const name = entry.student_name || (sObj ? sObj.name : 'Aluno');
-          const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (entry.turma || '');
-          const time = window.mealValidatorService.formatTimeString(entry.entry_time || entry.entryTime);
+          const rawName = entry.student_name || (sObj ? sObj.name : 'Aluno');
+          const rawGradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (entry.turma || '');
+          const rawTime = window.mealValidatorService.formatTimeString(entry.entry_time || entry.entryTime);
+
+          const name = this._esc(rawName);
+          const gradeTurma = this._esc(rawGradeTurma);
+          const time = this._esc(rawTime);
+
           return `
             <div class="tv-feed-item ${idx === 0 ? 'tv-feed-item-new' : ''}">
               <div class="tv-feed-item-name" title="${name}">${name}</div>
@@ -356,9 +361,14 @@ class DashboardController {
         refList.innerHTML = todayMeals.map((meal, idx) => {
           const reg = meal.studentRegistration || meal.student_registration;
           const sObj = studentMapByReg.get(reg);
-          const name = meal.studentName || (sObj ? sObj.name : 'Aluno');
-          const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (meal.turma || '');
-          const time = window.mealValidatorService.formatTimeString(meal.timestamp || meal.created_at);
+          const rawName = meal.studentName || (sObj ? sObj.name : 'Aluno');
+          const rawGradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (meal.turma || '');
+          const rawTime = window.mealValidatorService.formatTimeString(meal.timestamp || meal.created_at);
+
+          const name = this._esc(rawName);
+          const gradeTurma = this._esc(rawGradeTurma);
+          const time = this._esc(rawTime);
+
           return `
             <div class="tv-feed-item ${idx === 0 ? 'tv-feed-item-new' : ''}">
               <div class="tv-feed-item-name" title="${name}">${name}</div>
@@ -493,7 +503,7 @@ class DashboardController {
         } else if (row.mealStatus === 'saude') {
           statusBadge = '<span class="badge" style="background: rgba(239,68,68,0.2); color: #f87171;">🩺 MOTIVO DE SAÚDE</span>';
         } else if (row.mealStatus === 'outros') {
-          const notesEscaped = (row.mealNotes || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+          const notesEscaped = this._esc(row.mealNotes || '');
           statusBadge = `<span class="badge" style="background: rgba(234,179,8,0.2); color: #fde047;" title="${notesEscaped}">✍️ OUTROS: ${notesEscaped}</span>`;
         } else {
           statusBadge = '<span class="badge badge-success">✓ ALMOÇOU</span>';
@@ -511,8 +521,8 @@ class DashboardController {
         <td><strong>${this._esc(row.registration)}</strong></td>
         <td>${this._esc(row.name)}</td>
         <td>${this._esc(row.gradeTurma)}</td>
-        <td>${row.entryTime}</td>
-        <td>${row.mealTime} ${row.method !== '—' ? `<small style="color: var(--text-dim);">(${row.method})</small>` : ''}</td>
+        <td>${this._esc(row.entryTime)}</td>
+        <td>${this._esc(row.mealTime)} ${row.method !== '—' ? `<small style="color: var(--text-dim);">(${this._esc(row.method)})</small>` : ''}</td>
         <td>${statusBadge}</td>
       </tr>
     `;

@@ -10,6 +10,19 @@ const turmasPorSerie = {
   '3º Ano': ['Turma A', 'Turma B', 'Turma C', 'Turma D', 'Turma E']
 };
 
+/**
+ * HTML Entity Escape helper against XSS
+ */
+function _esc(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+window._esc = _esc;
+
 const ADMIN_PASSWORD = 'segurança123';
 
 document.addEventListener('DOMContentLoaded', async () => {
@@ -195,20 +208,44 @@ document.addEventListener('DOMContentLoaded', async () => {
     formStudent.addEventListener('submit', async (e) => {
       e.preventDefault();
       const id = document.getElementById('student-id').value;
-      const name = document.getElementById('student-name').value;
-      const registration = document.getElementById('student-registration').value;
+      const rawName = document.getElementById('student-name').value;
+      const rawRegistration = document.getElementById('student-registration').value;
       const grade = document.getElementById('student-grade').value;
       const turma = document.getElementById('student-turma').value;
 
+      const cleanName = (rawName || '').trim();
+      const cleanRegistration = (rawRegistration || '').trim();
+
+      // Validação estrita: apenas caracteres alfanuméricos e espaços válidos
+      const validTextRegex = /^[a-zA-Z0-9\u00C0-\u017F\s]+$/;
+
+      if (!cleanName || !validTextRegex.test(cleanName)) {
+        await showAlertModal({
+          title: 'Nome Inválido',
+          message: 'O campo Nome Completo deve conter apenas caracteres alfanuméricos e espaços válidos.',
+          type: 'danger'
+        });
+        return;
+      }
+
+      if (!cleanRegistration || !validTextRegex.test(cleanRegistration)) {
+        await showAlertModal({
+          title: 'Matrícula Inválida',
+          message: 'O campo Matrícula deve conter apenas caracteres alfanuméricos e espaços válidos.',
+          type: 'danger'
+        });
+        return;
+      }
+
       showLoadingModal('Salvando cadastro no banco de dados e sincronizando com a nuvem...', 'Salvando Aluno');
       try {
-        await window.studentService.saveStudent({ id, name, registration, grade, turma });
+        await window.studentService.saveStudent({ id, name: cleanName, registration: cleanRegistration, grade, turma });
         hideLoadingModal();
         closeStudentModal();
         renderStudentsTable();
         await showAlertModal({
           title: 'Aluno Salvo',
-          message: `O cadastro do aluno "${name}" foi salvo com sucesso!`,
+          message: `O cadastro do aluno "${cleanName}" foi salvo com sucesso!`,
           type: 'success'
         });
       } catch (err) {
@@ -520,10 +557,10 @@ async function renderStudentsTable() {
 
   tbody.innerHTML = students.map(s => `
     <tr>
-      <td><input type="checkbox" class="badge-select" data-id="${s.id}" ${selectedBadgeIds.has(s.id) ? 'checked' : ''}></td>
-      <td><strong>${s.registration}</strong></td>
-      <td>${s.name}</td>
-      <td>${s.grade} — ${s.turma}</td>
+      <td><input type="checkbox" class="badge-select" data-id="${_esc(s.id)}" ${selectedBadgeIds.has(s.id) ? 'checked' : ''}></td>
+      <td><strong>${_esc(s.registration)}</strong></td>
+      <td>${_esc(s.name)}</td>
+      <td>${_esc(s.grade)} — ${_esc(s.turma)}</td>
       <td>
         ${!s.active 
           ? '<span class="badge badge-danger">INATIVO</span>' 
@@ -533,14 +570,14 @@ async function renderStudentsTable() {
         }
       </td>
       <td>
-        <button class="btn btn-secondary btn-sm" onclick="openEditStudentModal('${s.id}')">✏️ Editar / QR</button>
-        <button class="btn btn-secondary btn-sm" onclick="confirmResetStudentDevice('${s.id}', '${s.name.replace(/'/g, "\\'")}')" title="Desvincular celular atual e permitir cadastro em novo aparelho">
+        <button class="btn btn-secondary btn-sm" onclick="openEditStudentModal('${_esc(s.id)}')">✏️ Editar / QR</button>
+        <button class="btn btn-secondary btn-sm" onclick="confirmResetStudentDevice('${_esc(s.id)}', '${_esc(s.name).replace(/'/g, "\\'")}')" title="Desvincular celular atual e permitir cadastro em novo aparelho">
           📱 Liberar Celular
         </button>
-        <button class="btn ${s.active ? 'btn-warning' : 'btn-success'} btn-sm" onclick="toggleStudentStatus('${s.id}')">
+        <button class="btn ${s.active ? 'btn-warning' : 'btn-success'} btn-sm" onclick="toggleStudentStatus('${_esc(s.id)}')">
           ${s.active ? '🚫 Desativar' : '✅ Ativar'}
         </button>
-        <button class="btn btn-danger btn-sm" onclick="confirmDeleteStudent('${s.id}', '${s.name.replace(/'/g, "\\'")}')" title="Excluir aluno permanentemente">🗑️ Excluir</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmDeleteStudent('${_esc(s.id)}', '${_esc(s.name).replace(/'/g, "\\'")}')" title="Excluir aluno permanentemente">🗑️ Excluir</button>
       </td>
     </tr>
   `).join('');
