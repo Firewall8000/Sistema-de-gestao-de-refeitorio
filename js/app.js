@@ -23,8 +23,6 @@ function _esc(v) {
 }
 window._esc = _esc;
 
-const ADMIN_PASSWORD = 'segurança123';
-
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('🚀 Inicializando Sistema Santos Dumont...');
 
@@ -99,27 +97,41 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   if (formAdminAuth) {
-    formAdminAuth.addEventListener('submit', (e) => {
+    formAdminAuth.addEventListener('submit', async (e) => {
       e.preventDefault();
       const inputPassword = document.getElementById('input-admin-password');
       const errorMsg = document.getElementById('admin-auth-error');
       const passwordVal = inputPassword ? inputPassword.value : '';
 
-      if (passwordVal === ADMIN_PASSWORD) {
-        if (window.authManager) {
-          window.authManager.setRole('ADMIN');
-        }
-        closeAdminAuthModal();
-      } else {
+      const adminEmail = 'danielsandes05@gmail.com';
+
+      showLoadingModal('Autenticando com o servidor seguro...', 'Acesso Admin');
+
+      const { data, error } = await window.supabaseClient.auth.signInWithPassword({
+        email: adminEmail,
+        password: passwordVal
+      });
+
+      hideLoadingModal();
+
+      if (error || !data.session) {
         if (errorMsg) {
-          errorMsg.textContent = 'Senha incorreta';
+          errorMsg.textContent = 'Senha incorreta ou acesso não autorizado.';
           errorMsg.style.display = 'block';
         }
         if (inputPassword) {
           inputPassword.value = '';
           inputPassword.focus();
         }
+        return;
       }
+
+      // Sucesso: Ativa perfil ADMIN e fecha modal
+      if (window.authManager) {
+        window.authManager.setRole('ADMIN');
+      }
+      closeAdminAuthModal();
+      await refreshAllUI();
     });
   }
 
