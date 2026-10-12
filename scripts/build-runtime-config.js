@@ -197,6 +197,8 @@ window.SUPABASE_ANON_KEY = ${JSON.stringify(
   )};
 
 window.VAPID_PUBLIC_KEY = ${JSON.stringify((process.env.VAPID_PUBLIC_KEY || '').trim())};
+
+window.SENTRY_DSN = ${JSON.stringify((process.env.SENTRY_DSN || 'https://cc4a74aefdec84c49de43852c843caac@o4512226716942336.ingest.us.sentry.io/4512226763669504').trim())};
 `;
 
   fs.writeFileSync(

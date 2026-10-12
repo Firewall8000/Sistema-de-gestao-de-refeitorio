@@ -4,8 +4,8 @@
    ========================================================================== */
 
 const CACHE_PREFIX = 'cesd-refectory-';
-// 1. Mudamos a versão para v3.4.0 para forçar o navegador a descartar o cache antigo
-const CACHE_NAME = `${CACHE_PREFIX}v3.4.0`;
+// 1. Mudamos a versão para v3.5.0 para forçar o navegador a atualizar os ativos com o Sentry
+const CACHE_NAME = `${CACHE_PREFIX}v3.5.0`;
 
 const ASSETS_TO_CACHE = [
   './',
@@ -18,6 +18,7 @@ const ASSETS_TO_CACHE = [
   './css/dashboard.css',
   './assets/img/logo.png',
   './js/runtime-config.js',
+  './js/sentry-init.js',
   './js/config.js',
   './js/app.js',
   './js/db.js',
