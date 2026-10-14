@@ -393,6 +393,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Gemini AI: pergunta da Diretoria
+  const btnAskGemini = document.getElementById('btn-ask-gemini');
+  const aiQuestionInput = document.getElementById('ai-custom-question-input');
+  const askGemini = () => {
+    if (!window.dashboardController || (btnAskGemini && btnAskGemini.disabled)) return;
+    const question = aiQuestionInput ? aiQuestionInput.value.trim() : '';
+    window.dashboardController.askGeminiAI(question);
+  };
+  if (btnAskGemini) {
+    btnAskGemini.addEventListener('click', askGemini);
+  }
+  if (aiQuestionInput) {
+    aiQuestionInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        askGemini();
+      }
+    });
+  }
+
   // Dashboard Period Selector Buttons
   document.querySelectorAll('.dash-period-btn').forEach(btn => {
     btn.addEventListener('click', () => {

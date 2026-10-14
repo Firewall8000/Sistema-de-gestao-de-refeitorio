@@ -637,6 +637,63 @@ class DashboardController {
     }
   }
 
+  async askGeminiAI(customQuestion = '') {
+    const responseBox = document.getElementById('ai-gemini-response-box');
+    const btnAsk = document.getElementById('btn-ask-gemini');
+    if (!responseBox) return;
+
+    responseBox.style.display = 'block';
+    responseBox.textContent = '⏳ O Gemini está analisando os dados do colégio...';
+    if (btnAsk) btnAsk.disabled = true;
+
+    try {
+      const toNumber = (id, fallback) => {
+        const raw = document.getElementById(id)?.textContent || '';
+        const n = parseInt(raw.replace(/\D/g, ''), 10);
+        return Number.isFinite(n) ? n : fallback;
+      };
+
+      const totalStudents = toNumber('dash-total-students', 437);
+      const presentCount = toNumber('dash-present-today', 0);
+      const servedCount = toNumber('dash-served-today', 0);
+      const externalFoodCount = toNumber('dash-external-food', 0);
+
+      const presenceRate = totalStudents > 0 ? ((presentCount / totalStudents) * 100).toFixed(1) : '0.0';
+      const adhesionRate = presentCount > 0 ? ((servedCount / presentCount) * 100).toFixed(1) : '0.0';
+      const absentCount = Math.max(0, totalStudents - presentCount);
+
+      const summaryData = {
+        period: this.currentPeriod === 'today' ? 'Hoje' : (this.currentPeriod === 'week' ? 'Esta Semana' : 'Este Mês'),
+        totalStudents,
+        presentCount,
+        presenceRate,
+        servedCount,
+        adhesionRate,
+        externalFoodCount,
+        absentCount,
+        peakPortaria: document.getElementById('dir-pico-portaria')?.textContent || '--:--',
+        peakRefeitorio: document.getElementById('dir-pico-refeitorio')?.textContent || '--:--'
+      };
+
+      const res = await fetch('/api/gemini-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ summaryData, customQuestion })
+      });
+
+      const result = await res.json();
+      if (!res.ok || result.error) {
+        throw new Error(result.error || 'Erro na resposta do servidor.');
+      }
+
+      responseBox.textContent = result.analysis;
+    } catch (err) {
+      responseBox.textContent = '❌ Erro ao consultar o Gemini: ' + err.message;
+    } finally {
+      if (btnAsk) btnAsk.disabled = false;
+    }
+  }
+
   // ========================================================================
   //  RELATÓRIO EXECUTIVO (WORD .doc)
   // ========================================================================
