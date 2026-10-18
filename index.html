@@ -172,6 +172,35 @@
           <div class="validation-sub" id="val-sub">Matrícula: 202600123 • Registrado às 12:15:30</div>
         </div>
 
+        <!-- Fila por Ordem de Chegada (Portaria & Refeitório) -->
+        <div id="scanner-queue-section" style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-color);">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem;">
+            <h3 style="font-size: 1rem; margin: 0;" id="scanner-queue-title">📋 Ordem de Chegada — Fila do Almoço (1º ao 150º)</h3>
+            <span class="badge badge-info" id="scanner-queue-summary">0 alunos na fila</span>
+          </div>
+          <div class="table-responsive" style="max-height: 380px; overflow-y: auto;">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width: 110px;">Colocação</th>
+                  <th>Matrícula</th>
+                  <th>Nome do Aluno</th>
+                  <th>Série / Turma</th>
+                  <th>Horário (Portaria)</th>
+                  <th>Status no Refeitório</th>
+                </tr>
+              </thead>
+              <tbody id="scanner-queue-tbody">
+                <tr>
+                  <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                    Nenhum aluno registrado na portaria hoje.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
     </section>
 

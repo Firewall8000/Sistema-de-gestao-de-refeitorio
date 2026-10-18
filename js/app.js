@@ -522,6 +522,10 @@ async function refreshAllUI() {
     const currentMode = window.mealValidatorService.getScannerMode();
     window.mealValidatorService.updateScannerUIForMode(currentMode);
   }
+  if (window.dashboardController) {
+    window.dashboardController.initRealtimeSubscription();
+    window.dashboardController.startTvClock();
+  }
   renderStudentsTable();
 }
 

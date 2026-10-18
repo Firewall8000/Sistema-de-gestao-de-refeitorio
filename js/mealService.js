@@ -53,6 +53,7 @@ class MealValidatorService {
     }
 
     this.updateTodayCounterUI();
+    this.renderScannerQueueList();
   }
 
   /**
@@ -91,7 +92,9 @@ class MealValidatorService {
       timestamp: data.timestamp,
       qrTokenUsed: data.qr_token_used || data.qrTokenUsed,
       synced: data.synced !== undefined ? data.synced : true,
-      validationMethod: data.validation_method || data.validationMethod
+      validationMethod: data.validation_method || data.validationMethod,
+      mealStatus: data.meal_status || data.mealStatus || null,
+      notes: data.notes || null
     };
   }
 
@@ -125,26 +128,11 @@ class MealValidatorService {
   }
 
   /**
-   * Counts total meals served today.
+   * Counts total presencial meals served today (ignores ausente/marmita/externa).
    */
   async getTodayMealsCount() {
-    const today = this.getTodayDateString();
-
-    if (window.supabaseClient && navigator.onLine) {
-      try {
-        const { count, error } = await window.supabaseClient
-          .from('meal_logs')
-          .select('*', { count: 'exact', head: true })
-          .eq('date', today);
-
-        if (!error && count !== null) {
-          return count;
-        }
-      } catch (e) {}
-    }
-
     try {
-      const meals = await window.dbEngine.getAllByIndex('meal_logs', 'date', today);
+      const meals = await this.getTodayMealsAll();
       return meals.length;
     } catch (e) {
       return 0;
@@ -208,6 +196,159 @@ class MealValidatorService {
   }
 
   /**
+   * Returns today's portaria entries ordered by arrival time (ASC), one per student.
+   * Index 0 = 1º lugar, index 1 = 2º lugar, etc.
+   * Supabase (nuvem) + IndexedDB (fallback / registros offline ainda não sincronizados).
+   */
+  async getTodayOrderedEntries() {
+    const today = this.getTodayDateString();
+    let entries = [];
+
+    if (window.supabaseClient && navigator.onLine) {
+      try {
+        const { data, error } = await window.supabaseClient
+          .from('school_entries')
+          .select('*')
+          .eq('entry_date', today)
+          .order('entry_time', { ascending: true });
+
+        if (!error && Array.isArray(data)) entries = data.slice();
+      } catch (e) {}
+    }
+
+    try {
+      const local = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', today);
+      if (Array.isArray(local) && local.length) {
+        const knownIds = new Set(entries.map(e => e.id));
+        local.forEach(e => { if (!knownIds.has(e.id)) entries.push(e); });
+      }
+    } catch (e) {}
+
+    const timeOf = (e) => {
+      const t = new Date(e.entry_time || e.entryTime).getTime();
+      return Number.isFinite(t) ? t : Number.MAX_SAFE_INTEGER;
+    };
+    entries.sort((a, b) => timeOf(a) - timeOf(b));
+
+    // Remove duplicatas por student_id (mantém a primeira chegada)
+    const seen = new Set();
+    return entries.filter(e => {
+      const sId = e.student_id || e.studentId;
+      if (!sId) return true;
+      if (seen.has(sId)) return false;
+      seen.add(sId);
+      return true;
+    });
+  }
+
+  /**
+   * Returns ALL of today's meal_logs (presencial + marmita/externa), ordered by timestamp (ASC).
+   * Supabase (nuvem) + IndexedDB (fallback / registros offline ainda não sincronizados).
+   */
+  async _fetchTodayMealsRaw() {
+    const today = this.getTodayDateString();
+    let meals = [];
+
+    if (window.supabaseClient && navigator.onLine) {
+      try {
+        const { data, error } = await window.supabaseClient
+          .from('meal_logs')
+          .select('*')
+          .eq('date', today);
+
+        if (!error && Array.isArray(data)) meals = data.slice();
+      } catch (e) {}
+    }
+
+    try {
+      const local = await window.dbEngine.getAllByIndex('meal_logs', 'date', today);
+      if (Array.isArray(local) && local.length) {
+        const knownIds = new Set(meals.map(m => m.id));
+        local.forEach(m => { if (!knownIds.has(m.id)) meals.push(m); });
+      }
+    } catch (e) {}
+
+    const timeOf = (m) => {
+      const t = new Date(m.timestamp || m.created_at).getTime();
+      return Number.isFinite(t) ? t : Number.MAX_SAFE_INTEGER;
+    };
+    meals.sort((a, b) => timeOf(a) - timeOf(b));
+    return meals;
+  }
+
+  /**
+   * true = aluno marcado como ausente na fila do almoço (não trava a fila e não conta como refeição servida).
+   */
+  _isAbsentMeal(meal) {
+    if (!meal) return false;
+    const status = String(meal.meal_status || meal.mealStatus || '').toLowerCase();
+    const method = String(meal.validation_method || meal.validationMethod || '').toUpperCase();
+    return status === 'ausente' || method === 'AUSENTE';
+  }
+
+  /**
+   * true = refeição presencial no refeitório; false = ausência ou apenas justificativa externa (marmita / externa).
+   */
+  _isPresencialMeal(meal) {
+    if (!meal || this._isAbsentMeal(meal)) return false;
+    const status = meal.meal_status || meal.mealStatus;
+    return !(status === 'marmita' || status === 'externa');
+  }
+
+  /**
+   * Returns today's presencial meals (almoços liberados no refeitório), ignoring marmita/externa/ausente.
+   */
+  async getTodayMealsAll() {
+    const meals = await this._fetchTodayMealsRaw();
+    return meals.filter(m => this._isPresencialMeal(m));
+  }
+
+  /**
+   * Cross-references ordered entries with today's meals.
+   * - findMeal(entry): refeição presencial do aluno (ou null = Pendente)
+   * - isExternal(entry): aluno com marmita/externa (não almoça no refeitório, não trava a fila)
+   * - isAbsent(entry): aluno marcado como ausente na fila (não almoça no refeitório, não trava a fila)
+   * - nextIdx: índice do primeiro aluno ainda Pendente (-1 se ninguém)
+   */
+  _computeQueueState(orderedEntries, rawMeals, studentMapById = new Map()) {
+    const servedByKey = new Map();
+    const externalKeys = new Set();
+    const absentKeys = new Set();
+
+    (rawMeals || []).forEach(m => {
+      const keys = [m.student_id || m.studentId, m.student_registration || m.studentRegistration].filter(Boolean);
+      if (this._isAbsentMeal(m)) {
+        keys.forEach(k => absentKeys.add(k));
+      } else if (this._isPresencialMeal(m)) {
+        keys.forEach(k => { if (!servedByKey.has(k)) servedByKey.set(k, m); });
+      } else {
+        keys.forEach(k => externalKeys.add(k));
+      }
+    });
+
+    const keysOf = (entry) => {
+      const sId = entry.student_id || entry.studentId;
+      const sObj = sId && studentMapById ? studentMapById.get(sId) : null;
+      const reg = entry.student_registration || entry.studentRegistration || (sObj ? sObj.registration : null);
+      return [sId, reg].filter(Boolean);
+    };
+
+    const findMeal = (entry) => {
+      for (const k of keysOf(entry)) {
+        if (servedByKey.has(k)) return servedByKey.get(k);
+      }
+      return null;
+    };
+
+    const isExternal = (entry) => keysOf(entry).some(k => externalKeys.has(k));
+    const isAbsent = (entry) => keysOf(entry).some(k => absentKeys.has(k));
+
+    const nextIdx = (orderedEntries || []).findIndex(e => !findMeal(e) && !isExternal(e) && !isAbsent(e));
+
+    return { findMeal, isExternal, isAbsent, nextIdx };
+  }
+
+  /**
    * Primary entry point for validating and recording scan or manual attempt based on active mode.
    * accepts { qrToken } or { registration }
    */
@@ -261,17 +402,27 @@ class MealValidatorService {
     const existingEntry = await this.getTodayEntryForStudent(student.id);
     if (existingEntry) {
       const entryTimeFormatted = this.formatTimeString(existingEntry.entry_time || existingEntry.entryTime || existingEntry.timestamp);
+      let dupPos = 0;
+      try {
+        const dupEntries = await this.getTodayOrderedEntries();
+        const idx = dupEntries.findIndex(e => (e.student_id || e.studentId) === student.id);
+        if (idx !== -1) dupPos = idx + 1;
+      } catch (e) {}
+      const dupMsg = dupPos > 0
+        ? `Entrada já registrada hoje às ${entryTimeFormatted} — Colocação na fila do almoço: ${dupPos}º lugar`
+        : `Entrada já registrada hoje às ${entryTimeFormatted}.`;
+
       this.displayValidationResult({
         success: false,
         title: 'CHECK-IN JÁ REALIZADO HOJE!',
         detail: `${student.name} — ${student.grade} (${student.turma})`,
-        sub: `Entrada já registrada hoje às ${entryTimeFormatted}.`
+        sub: dupMsg
       });
 
       if (typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: 'Check-in Duplicado',
-          message: 'Check-in já realizado hoje para este aluno!',
+          message: `Check-in já realizado hoje para este aluno!\n\n${dupMsg}`,
           type: 'warning'
         });
       }
@@ -325,19 +476,31 @@ class MealValidatorService {
     // 4. Sucesso: Exiba o modal de sucesso informando o nome do aluno, turma e o horário de chegada formatado (HH:mm:ss). Atualize o contador de entradas do dia.
     const formattedTime = this.formatTimeString(nowIso);
 
+    // Colocação exata na fila do almoço (ordem de chegada)
+    let pos = 0;
+    try {
+      const entries = await this.getTodayOrderedEntries();
+      const idx = entries.findIndex(e => (e.student_id || e.studentId) === student.id);
+      pos = idx !== -1 ? idx + 1 : entries.length;
+    } catch (e) {}
+    if (!pos) pos = 1;
+    const loteLabel = pos <= 150
+      ? `${pos}º da Fila (1º Lote • 1 a 150)`
+      : `${pos}º da Fila (2º Lote • 151+)`;
+
     this.displayValidationResult({
       success: true,
-      title: 'ENTRADA REGISTRADA ✓',
+      title: 'ENTRADA REGISTRADA ✓ — ' + pos + 'º DA FILA',
       detail: `${student.name} — ${student.grade} ${student.turma}`,
-      sub: `Chegada registrada às ${formattedTime} (${method === 'qr_code' ? 'QR Code' : 'Manual'})`
+      sub: `Colocação para o almoço: ${pos}º lugar • Chegada às ${formattedTime}`
     });
 
     await this.updateTodayCounterUI();
 
     if (typeof window.showAlertModal === 'function') {
       await window.showAlertModal({
-        title: 'Entrada Registrada',
-        message: `Entrada registrada com sucesso!\n\nAluno: ${student.name}\nTurma: ${student.turma}\nHorário: ${formattedTime}`,
+        title: `Entrada Registrada — ${loteLabel}`,
+        message: `Entrada registrada com sucesso!\n\n🏅 Colocação na Fila do Almoço: ${pos}º lugar ${pos > 150 ? '(2º Lote)' : '(Prioridade 1–150)'}\nAluno: ${student.name}\nTurma: ${student.grade} - ${student.turma}\nHorário: ${formattedTime}`,
         type: 'success'
       });
     }
@@ -395,12 +558,12 @@ class MealValidatorService {
     }
 
     // Verificação obrigatória: o aluno precisa ter entrada registrada na portaria hoje
-    // (school_entries.entry_date === todayStr). Busca no Supabase com fallback no IndexedDB.
-    const todayStr = this.getTodayDateString();
-    const gateEntry = await this.getTodayEntryForStudent(student.id);
-    const hasGateEntry = !!gateEntry && (gateEntry.entry_date || gateEntry.entryDate || todayStr) === todayStr;
+    // (school_entries.entry_date === todayStr). Busca no Supabase com fallback no IndexedDB,
+    // já ordenada por horário de chegada (índice 0 = 1º lugar).
+    const orderedEntries = await this.getTodayOrderedEntries();
+    const studentIdx = orderedEntries.findIndex(e => (e.student_id || e.studentId) === student.id);
 
-    if (!hasGateEntry) {
+    if (studentIdx === -1) {
       // displayValidationResult com success:false toca o áudio de erro
       this.displayValidationResult({
         success: false,
@@ -422,26 +585,78 @@ class MealValidatorService {
       return { success: false, reason: 'no_gate_entry' };
     }
 
+    const studentPos = studentIdx + 1;
+
     // Single-meal check & unique_student_meal_per_date error handling
     const existingMeal = await this.getTodayMealForStudent(student.registration);
 
     if (existingMeal) {
       const mealTime = this.formatTimeString(existingMeal.timestamp);
+      if (this._isAbsentMeal(existingMeal)) {
+        this.displayValidationResult({
+          success: false,
+          title: 'ALUNO MARCADO COMO AUSENTE! (' + studentPos + 'º DA FILA)',
+          detail: `${student.name} — ${student.grade} (${student.turma})`,
+          sub: `Ausência registrada às ${mealTime} (${studentPos}º da fila). A fila já avançou.`
+        });
+
+        if (typeof window.showAlertModal === 'function') {
+          await window.showAlertModal({
+            title: 'Aluno Marcado como Ausente',
+            message: `O aluno ${student.name} (${studentPos}º da fila) foi marcado como ausente no refeitório às ${mealTime}.`,
+            type: 'warning'
+          });
+        }
+        return { success: false, reason: 'marked_absent' };
+      }
+
       this.displayValidationResult({
         success: false,
         title: 'ALMOÇO JÁ REGISTRADO HOJE!',
         detail: `${student.name} — ${student.grade} (${student.turma})`,
-        sub: `Refeição já concedida hoje às ${mealTime}. Bloqueado segundo a RN-001.`
+        sub: `Refeição já concedida hoje às ${mealTime} (${studentPos}º da fila). Bloqueado segundo a RN-001.`
       });
 
       if (typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: 'Almoço Já Registrado',
-          message: 'Este aluno já realizou a refeição hoje!',
+          message: `Este aluno já realizou a refeição hoje!\n\nEle era o ${studentPos}º da fila.`,
           type: 'warning'
         });
       }
       return false;
+    }
+
+    // TRAVA DE BARRAMENTO ESTRITO SEQUENCIAL (1 POR 1):
+    // só libera o primeiro aluno da ordem de chegada que ainda está "Pendente".
+    // (refeições presenciais de hoje = getTodayMealsAll(); marmita/externa não travam a fila)
+    const rawMeals = await this._fetchTodayMealsRaw();
+    const lockStudentMap = new Map([[student.id, student]]);
+    try {
+      const allStudents = await window.studentService.getAllStudents();
+      (allStudents || []).forEach(s => { if (!lockStudentMap.has(s.id)) lockStudentMap.set(s.id, s); });
+    } catch (e) {}
+    const queue = this._computeQueueState(orderedEntries, rawMeals, lockStudentMap);
+    const nextIdx = queue.nextIdx;
+    const nextEntry = nextIdx !== -1 ? orderedEntries[nextIdx] : null;
+    const nextPos = nextIdx + 1;
+
+    if (nextEntry && (nextEntry.student_id || nextEntry.studentId) !== student.id) {
+      this.displayValidationResult({
+        success: false,
+        title: 'FORA DA ORDEM DA FILA! (' + studentPos + 'º LUGAR)',
+        detail: `${student.name} — ${student.grade} (${student.turma})`,
+        sub: `A vez atual é do ${nextPos}º da fila: ${nextEntry.student_name || 'Aluno'} (${nextEntry.turma || ''}).`
+      });
+
+      if (typeof window.showAlertModal === 'function') {
+        await window.showAlertModal({
+          title: 'Aguarde a sua Vez na Fila',
+          message: `O aluno ${student.name} está na ${studentPos}ª colocação de chegada.\n\nNo momento, o leitor aguarda o ${nextPos}º da fila:\n👉 ${nextEntry.student_name || 'Aluno'} (${nextEntry.turma || ''})\n\nO atendimento segue rigorosamente a ordem de chegada na escola.`,
+          type: 'warning'
+        });
+      }
+      return { success: false, reason: 'out_of_order' };
     }
 
     const nowIso = new Date().toISOString();
@@ -504,14 +719,149 @@ class MealValidatorService {
 
     await window.dbEngine.put('meal_logs', mealLog);
 
+    // Verifica se o(s) aluno(s) imediatamente seguinte(s) na fila já foram marcados como AUSENTE
+    // pela Coordenação/Diretoria, pulando-os automaticamente e avisando no banner/modal.
+    const skippedAbsent = [];
+    let scanIdx = studentIdx + 1;
+    while (scanIdx < orderedEntries.length) {
+      const nextCand = orderedEntries[scanIdx];
+      if (queue.isAbsent(nextCand)) {
+        const candId = nextCand.student_id || nextCand.studentId;
+        const candStudent = lockStudentMap.get(candId);
+        const candName = nextCand.student_name || (candStudent ? candStudent.name : 'Aluno');
+        skippedAbsent.push(`${scanIdx + 1}º (${candName})`);
+        scanIdx++;
+      } else if (queue.findMeal(nextCand) || queue.isExternal(nextCand)) {
+        scanIdx++;
+      } else {
+        break;
+      }
+    }
+
+    let skippedNotice = '';
+    if (skippedAbsent.length > 0) {
+      const nextPendingPos = scanIdx < orderedEntries.length ? (scanIdx + 1) : null;
+      const skippedLabel = skippedAbsent.length === 1
+        ? `${skippedAbsent[0]} ausente`
+        : `${skippedAbsent.join(', ')} ausentes`;
+      skippedNotice = nextPendingPos
+        ? `${skippedLabel} — próximo da fila: ${nextPendingPos}º lugar`
+        : `${skippedLabel} — fila concluída`;
+    }
+
     this.displayValidationResult({
       success: true,
-      title: 'ALMOÇO LIBERADO ✓',
+      title: 'ALMOÇO LIBERADO ✓ (' + studentPos + 'º DA FILA)',
       detail: `${student.name} — ${student.grade} ${student.turma}`,
-      sub: `Matrícula: ${student.registration} • Registrado às ${this.formatTimeString(nowIso)} (${method})`
+      sub: `${studentPos}º da fila • Matrícula: ${student.registration} • Liberado às ${this.formatTimeString(nowIso)} (${method})${skippedNotice ? ' • ' + skippedNotice : ''}`
     });
 
     await this.updateTodayCounterUI();
+
+    if (typeof window.showAlertModal === 'function') {
+      await window.showAlertModal({
+        title: 'Almoço Liberado',
+        message: `Almoço liberado com sucesso!\n\n🏅 Posição na Fila: ${studentPos}º lugar\nAluno: ${student.name}\nTurma: ${student.grade} - ${student.turma}\nHorário de Liberação: ${this.formatTimeString(nowIso)}${skippedNotice ? '\n\n⏭️ ' + skippedNotice : ''}`,
+        type: 'success'
+      });
+    }
+
+    return true;
+  }
+
+  /**
+   * Marca um aluno da fila como AUSENTE no almoço (exclusivo Coordenação / Diretoria)
+   * para destravar a fila sequencial.
+   * Assinatura: markStudentAbsentFromQueue(studentId, studentName, position)
+   */
+  async markStudentAbsentFromQueue(studentId, studentNameArg = null, positionArg = null) {
+    if (!studentId) return false;
+
+    const isOpts = studentNameArg && typeof studentNameArg === 'object';
+    const skipConfirm = isOpts ? !!studentNameArg.skipConfirm : false;
+    const passedName = (!isOpts && typeof studentNameArg === 'string' && studentNameArg.trim()) ? studentNameArg.trim() : null;
+    const passedPos = (!isOpts && Number.isFinite(Number(positionArg)) && Number(positionArg) > 0) ? Number(positionArg) : null;
+
+    const orderedEntries = await this.getTodayOrderedEntries();
+    const studentIdx = orderedEntries.findIndex(e => (e.student_id || e.studentId) === studentId);
+    const entry = studentIdx !== -1 ? orderedEntries[studentIdx] : null;
+    const studentPos = studentIdx !== -1 ? (studentIdx + 1) : (passedPos || null);
+
+    let student = null;
+    try {
+      const allStudents = await window.studentService.getAllStudents();
+      student = (allStudents || []).find(s => s.id === studentId) || null;
+    } catch (e) {}
+
+    if (!entry && !student) return false;
+
+    const studentName = passedName || (entry && entry.student_name) || (student ? student.name : 'Aluno');
+    const registration = (student && student.registration) || (entry && (entry.student_registration || entry.registration)) || studentId;
+    const turma = (student && student.turma) || (entry && entry.turma) || '—';
+    const grade = (student && student.grade) || (entry && entry.grade) || '—';
+    const qrToken = (student && student.qrToken) || 'AUSENTE';
+    const posLabel = studentPos ? `${studentPos}º da fila — ` : '';
+
+    if (!skipConfirm && typeof window.showConfirmModal === 'function') {
+      const confirmed = await window.showConfirmModal({
+        title: 'Confirmar Ausência na Fila',
+        message: `Deseja marcar o aluno ${studentName} (${posLabel}${grade} ${turma}) como AUSENTE no almoço?\n\nA vez passará automaticamente para o próximo aluno pendente da fila.`,
+        icon: '🚫',
+        confirmText: 'Sim, Marcar Ausência',
+        cancelText: 'Cancelar',
+        isDanger: true
+      });
+      if (!confirmed) return false;
+    }
+
+    const todayStr = this.getTodayDateString();
+    const nowIso = new Date().toISOString();
+    const absentLog = {
+      id: 'absent-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      studentId,
+      studentRegistration: registration,
+      studentName,
+      turma,
+      grade,
+      date: todayStr,
+      timestamp: nowIso,
+      qrTokenUsed: qrToken,
+      synced: navigator.onLine,
+      validationMethod: 'AUSENTE',
+      mealStatus: 'ausente'
+    };
+
+    if (window.supabaseClient && navigator.onLine) {
+      try {
+        const row = {
+          id: absentLog.id,
+          student_id: absentLog.studentId,
+          student_registration: absentLog.studentRegistration,
+          student_name: absentLog.studentName,
+          turma: absentLog.turma,
+          grade: absentLog.grade,
+          date: absentLog.date,
+          timestamp: absentLog.timestamp,
+          qr_token_used: absentLog.qrTokenUsed,
+          synced: true,
+          validation_method: 'AUSENTE'
+        };
+        await window.supabaseClient.from('meal_logs').insert(row);
+      } catch (err) {
+        console.warn('⚠️ Falha ao registrar ausência na fila no Supabase:', err);
+      }
+    }
+
+    try {
+      await window.dbEngine.put('meal_logs', absentLog);
+    } catch (e) {}
+
+    await this.updateTodayCounterUI();
+    if (window.dashboardController) {
+      Promise.resolve(window.dashboardController.refreshTvFeed()).catch(() => {});
+      Promise.resolve(window.dashboardController.refreshDashboardForPeriod()).catch(() => {});
+    }
+
     return true;
   }
 
@@ -566,8 +916,116 @@ class MealValidatorService {
       window.dashboardController.refreshTodayMetrics();
       window.dashboardController.loadLunchQueueTable();
     }
+
+    await this.renderScannerQueueList();
+  }
+
+  /**
+   * HTML Entity Escape helper against XSS (delegates to the global _esc from app.js).
+   */
+  _esc(v) {
+    if (typeof window._esc === 'function') return window._esc(v);
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  /**
+   * Renders the live arrival-order queue (#scanner-queue-tbody) on the scanner tab:
+   * 1º no topo até o último embaixo, apenas para visualização de status (sem botões de ausência).
+   */
+  async renderScannerQueueList() {
+    const tbody = document.getElementById('scanner-queue-tbody');
+    const summaryEl = document.getElementById('scanner-queue-summary');
+    if (!tbody && !summaryEl) return;
+
+    let orderedEntries = [];
+    let rawMeals = [];
+    let allStudents = [];
+    try { orderedEntries = await this.getTodayOrderedEntries(); } catch (e) {}
+    try { rawMeals = await this._fetchTodayMealsRaw(); } catch (e) {}
+    try { allStudents = await window.studentService.getAllStudents(); } catch (e) {}
+
+    const studentMapById = new Map((allStudents || []).map(s => [s.id, s]));
+    const queue = this._computeQueueState(orderedEntries, rawMeals, studentMapById);
+
+    const servedCount = orderedEntries.filter(e => !!queue.findMeal(e)).length;
+    const externalCount = orderedEntries.filter(e => !queue.findMeal(e) && queue.isExternal(e)).length;
+    const absentCount = orderedEntries.filter(e => !queue.findMeal(e) && queue.isAbsent(e)).length;
+    const pendingCount = Math.max(0, orderedEntries.length - servedCount - externalCount - absentCount);
+
+    if (summaryEl) {
+      summaryEl.textContent = absentCount > 0
+        ? `${orderedEntries.length} chegaram • ${servedCount} liberados • ${pendingCount} pendentes • ${absentCount} ausentes`
+        : `${orderedEntries.length} chegaram • ${servedCount} liberados • ${pendingCount} pendentes`;
+    }
+
+    if (!tbody) return;
+
+    if (orderedEntries.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+            Nenhum aluno registrado na portaria hoje.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const esc = (v) => this._esc(v);
+
+    tbody.innerHTML = orderedEntries.map((entry, idx) => {
+      const pos = idx + 1;
+      const sId = entry.student_id || entry.studentId;
+      const sObj = studentMapById.get(sId);
+      const registration = sObj ? sObj.registration : (entry.student_registration || entry.registration || '—');
+      const name = entry.student_name || (sObj ? sObj.name : 'Aluno');
+      const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (entry.turma || '—');
+      const entryTime = this.formatTimeString(entry.entry_time || entry.entryTime);
+
+      let posBadge;
+      if (pos <= 150) {
+        posBadge = `<span class="badge ${pos <= 3 ? 'badge-warning' : 'badge-info'}" style="font-weight: 800;">${esc(pos + 'º')}</span>`;
+      } else {
+        posBadge = `<span class="badge" style="font-weight: 800; background: rgba(148,163,184,0.2); color: #cbd5e1;">${esc(pos + 'º')}</span> <small style="color: var(--text-dim);">2º Lote</small>`;
+      }
+
+      const meal = queue.findMeal(entry);
+      const isNext = idx === queue.nextIdx;
+      let statusBadge;
+      if (meal) {
+        const mealTimeFormatted = this.formatTimeString(meal.timestamp || meal.created_at);
+        statusBadge = `<span class="badge badge-success">✓ Liberado • ${esc(mealTimeFormatted)}</span>`;
+      } else if (queue.isAbsent(entry)) {
+        statusBadge = '<span class="badge badge-danger">🚫 Ausente no Almoço</span>';
+      } else if (queue.isExternal(entry)) {
+        statusBadge = '<span class="badge" style="background: rgba(59,130,246,0.2); color: #60a5fa;">🍱 Refeição externa</span>';
+      } else if (isNext) {
+        statusBadge = '<span class="badge badge-info">👉 Próximo da Vez • ⏳ Pendente</span>';
+      } else {
+        statusBadge = '<span class="badge badge-warning">⏳ Pendente</span>';
+      }
+
+      return `
+        <tr${isNext ? ' style="background: rgba(6, 182, 212, 0.08);"' : ''}>
+          <td style="text-align: center;">${posBadge}</td>
+          <td><strong>${esc(registration)}</strong></td>
+          <td>${esc(name)}</td>
+          <td>${esc(gradeTurma)}</td>
+          <td>${esc(entryTime)}</td>
+          <td>${statusBadge}</td>
+        </tr>
+      `;
+    }).join('');
   }
 }
 
 const mealValidatorService = new MealValidatorService();
 window.mealValidatorService = mealValidatorService;
+window.mealService = mealValidatorService;
+window.markStudentAbsentFromQueue = (studentId, studentName, position) =>
+  mealValidatorService.markStudentAbsentFromQueue(studentId, studentName, position);

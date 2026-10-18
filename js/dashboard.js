@@ -23,12 +23,14 @@ class DashboardController {
           .channel('realtime_dashboard_queue')
           // Escuta novas entradas na portaria
           .on('postgres_changes', { event: '*', schema: 'public', table: 'school_entries' }, () => {
+            if (window.mealValidatorService) window.mealValidatorService.updateTodayCounterUI();
             this.refreshTodayMetrics();
             this.refreshTvFeed();
             this.refreshDashboardForPeriod();
           })
           // Escuta novas refeições no refeitório
           .on('postgres_changes', { event: '*', schema: 'public', table: 'meal_logs' }, () => {
+            if (window.mealValidatorService) window.mealValidatorService.updateTodayCounterUI();
             this.refreshTodayMetrics();
             this.refreshTvFeed();
             this.refreshDashboardForPeriod();
@@ -229,20 +231,59 @@ class DashboardController {
   }
 
   // ========================================================================
-  //  TV LIVE FEED
+  //  TV LIVE FEED & GLOBAL CLOCK / DAILY RESET
   // ========================================================================
 
   startTvClock() {
     if (this.tvClockInterval) return;
-    const clockEl = document.getElementById('tv-clock');
-    if (!clockEl) return;
+
+    const initialToday = window.mealValidatorService ? window.mealValidatorService.getTodayDateString() : null;
+    let storedDate = null;
+    try { storedDate = localStorage.getItem('cesd_last_active_date'); } catch (e) {}
+    this._lastDateStr = storedDate || initialToday;
+    if (initialToday && !storedDate) {
+      try { localStorage.setItem('cesd_last_active_date', initialToday); } catch (e) {}
+    }
 
     const updateClock = () => {
       const now = new Date();
-      clockEl.textContent = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const clockEl = document.getElementById('tv-clock');
+      if (clockEl) {
+        clockEl.textContent = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      }
+
+      // Reset automático na virada do dia (23:59:59 → 00:00) ou ao reabrir o sistema em novo dia:
+      // funciona continuamente em segundo plano sem precisar estar com a aba da TV aberta.
+      if (window.mealValidatorService) {
+        const currentDateStr = window.mealValidatorService.getTodayDateString();
+        if (!this._lastDateStr) {
+          this._lastDateStr = currentDateStr;
+          try { localStorage.setItem('cesd_last_active_date', currentDateStr); } catch (e) {}
+        } else if (currentDateStr !== this._lastDateStr) {
+          this._lastDateStr = currentDateStr;
+          try { localStorage.setItem('cesd_last_active_date', currentDateStr); } catch (e) {}
+          const banner = document.getElementById('validation-banner');
+          if (banner) banner.style.display = 'none';
+          Promise.resolve(window.mealValidatorService.updateTodayCounterUI()).catch(err => console.warn('⚠️ Reset diário (contador/fila):', err));
+          Promise.resolve(this.refreshTvFeed()).catch(err => console.warn('⚠️ Reset diário (TV):', err));
+          Promise.resolve(this.refreshDashboardForPeriod()).catch(err => console.warn('⚠️ Reset diário (dashboard):', err));
+        }
+      }
     };
+
     updateClock();
     this.tvClockInterval = setInterval(updateClock, 1000);
+
+    if (!this._clockVisibilityBound && typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+      this._clockVisibilityBound = true;
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) updateClock();
+      });
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('focus', updateClock);
+        window.addEventListener('pageshow', updateClock);
+      }
+    }
   }
 
   stopTvClock() {
@@ -253,62 +294,38 @@ class DashboardController {
   }
 
   async refreshTvFeed() {
-    const todayStr = window.mealValidatorService 
-      ? window.mealValidatorService.getTodayDateString() 
-      : new Date().toISOString().split('T')[0];
+    if (!window.mealValidatorService) return;
+    const mvs = window.mealValidatorService;
 
+    // 1. Entradas de hoje em ordem CRESCENTE de chegada (entry_time ASC): 1º no topo.
+    //    Supabase (nuvem) com fallback no banco local — mesma fonte usada pela trava do refeitório.
     let todayEntries = [];
-    let todayMeals = [];
+    let rawMeals = [];
     let allStudents = [];
 
-    // 1. BUSCA EM TEMPO REAL DIRETO DO SUPABASE (NUVEM)
-    if (window.supabaseClient && navigator.onLine) {
-      try {
-        // Busca entradas da portaria de hoje (mais recentes primeiro)
-        const { data: entriesData } = await window.supabaseClient
-          .from('school_entries')
-          .select('*')
-          .eq('entry_date', todayStr)
-          .order('entry_time', { ascending: false });
-
-        if (entriesData) todayEntries = entriesData;
-
-        // Busca refeições do refeitório de hoje (mais recentes primeiro)
-        const { data: mealsData } = await window.supabaseClient
-          .from('meal_logs')
-          .select('*')
-          .eq('date', todayStr)
-          .order('timestamp', { ascending: false });
-
-        if (mealsData) todayMeals = mealsData;
-      } catch (err) {
-        console.warn('⚠️ Falha ao buscar feed da TV no Supabase:', err);
-      }
+    try {
+      todayEntries = await mvs.getTodayOrderedEntries();
+    } catch (err) {
+      console.warn('⚠️ Falha ao buscar entradas da portaria para a TV:', err);
     }
-
-    // 2. FALLBACK PARA O BANCO LOCAL (apenas se estiver offline)
-    if (todayEntries.length === 0 && window.dbEngine) {
-      try {
-        todayEntries = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', todayStr);
-      } catch (e) {}
+    try {
+      rawMeals = await mvs._fetchTodayMealsRaw();
+    } catch (err) {
+      console.warn('⚠️ Falha ao buscar refeições para a TV:', err);
     }
-    if (todayMeals.length === 0 && window.dbEngine) {
-      try {
-        todayMeals = await window.dbEngine.getAllByIndex('meal_logs', 'date', todayStr);
-      } catch (e) {}
-    }
-
     try {
       allStudents = await window.studentService.getAllStudents();
     } catch (e) {}
 
-    const studentMap = new Map(allStudents.map(s => [s.id, s]));
-    const studentMapByReg = new Map(allStudents.map(s => [s.registration, s]));
+    const studentMap = new Map((allStudents || []).map(s => [s.id, s]));
+    const queue = mvs._computeQueueState(todayEntries, rawMeals, studentMap);
 
     // Contadores da TV
     const presentCount = todayEntries.length;
-    const servedCount = todayMeals.length;
-    const waitingCount = Math.max(0, presentCount - servedCount);
+    const servedCount = todayEntries.filter(e => !!queue.findMeal(e)).length;
+    const externalCount = todayEntries.filter(e => !queue.findMeal(e) && queue.isExternal(e)).length;
+    const absentCount = todayEntries.filter(e => !queue.findMeal(e) && queue.isAbsent && queue.isAbsent(e)).length;
+    const waitingCount = Math.max(0, presentCount - servedCount - externalCount - absentCount);
 
     const elPresent = document.getElementById('tv-present-count');
     const elServed = document.getElementById('tv-served-count');
@@ -322,29 +339,49 @@ class DashboardController {
     if (elPortariaTotal) elPortariaTotal.textContent = presentCount;
     if (elRefTotal) elRefTotal.textContent = servedCount;
 
-    // Feed da Portaria (ordem decrescente de chegada)
+    // Dados comuns por linha (colocação, nome, série/turma)
+    const rows = todayEntries.map((entry, idx) => {
+      const pos = idx + 1;
+      const studentId = entry.student_id || entry.studentId || '';
+      const sObj = studentMap.get(studentId);
+      const rawName = entry.student_name || (sObj ? sObj.name : 'Aluno');
+      return {
+        entry,
+        idx,
+        pos,
+        studentId,
+        rawName,
+        name: this._esc(rawName),
+        gradeTurma: this._esc(sObj ? `${sObj.grade} — ${sObj.turma}` : (entry.turma || '')),
+        posBadge: `<span class="badge ${pos <= 3 ? 'badge-warning' : (pos <= 150 ? 'badge-info' : '')}" style="font-weight: 800; min-width: 2.8rem; text-align: center;${pos > 150 ? ' background: rgba(148,163,184,0.2); color: #cbd5e1;' : ''}">${this._esc(pos + 'º')}</span>`
+      };
+    });
+
+    const leftBlock = (r) => `
+      <div style="display: flex; align-items: center; gap: 0.6rem; min-width: 0; flex: 1;">
+        ${r.posBadge}
+        <div style="min-width: 0;">
+          <div class="tv-feed-item-name" style="max-width: 100%;" title="${r.name}">${r.name}</div>
+          <div style="font-size: 0.75rem; color: var(--text-muted);">${r.gradeTurma}${r.pos > 150 ? ' • 2º Lote' : ''}</div>
+        </div>
+      </div>
+    `;
+
+    // Coluna da Esquerda: ordem de chegada na portaria (1º, 2º, 3º... de cima para baixo)
     const portariaList = document.getElementById('tv-feed-portaria-list');
     if (portariaList) {
-      if (todayEntries.length === 0) {
+      if (rows.length === 0) {
         portariaList.innerHTML = '<div class="tv-feed-empty">Nenhum registro de entrada hoje</div>';
       } else {
-        portariaList.innerHTML = todayEntries.map((entry, idx) => {
-          const sId = entry.student_id || entry.studentId;
-          const sObj = studentMap.get(sId);
-          const rawName = entry.student_name || (sObj ? sObj.name : 'Aluno');
-          const rawGradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (entry.turma || '');
-          const rawTime = window.mealValidatorService.formatTimeString(entry.entry_time || entry.entryTime);
-
-          const name = this._esc(rawName);
-          const gradeTurma = this._esc(rawGradeTurma);
-          const time = this._esc(rawTime);
-
+        const lastIdx = rows.length - 1;
+        portariaList.innerHTML = rows.map(r => {
+          const time = this._esc(mvs.formatTimeString(r.entry.entry_time || r.entry.entryTime));
           return `
-            <div class="tv-feed-item ${idx === 0 ? 'tv-feed-item-new' : ''}">
-              <div class="tv-feed-item-name" title="${name}">${name}</div>
+            <div class="tv-feed-item ${r.idx === lastIdx ? 'tv-feed-item-new' : ''}">
+              ${leftBlock(r)}
               <div class="tv-feed-item-meta">
                 <div class="tv-feed-item-time">${time}</div>
-                <div>${gradeTurma}</div>
+                <div>Portaria</div>
               </div>
             </div>
           `;
@@ -352,33 +389,61 @@ class DashboardController {
       }
     }
 
-    // Feed do Refeitório (ordem decrescente de refeição)
+    // Coluna da Direita: mesma ordem, com status no refeitório (Pendente / Liberado / Ausente)
+    // e botão exclusivo da Coordenação/Diretoria para marcar ausência de alunos pendentes.
     const refList = document.getElementById('tv-feed-refeitorio-list');
     if (refList) {
-      if (todayMeals.length === 0) {
-        refList.innerHTML = '<div class="tv-feed-empty">Nenhum almoço registrado hoje</div>';
-      } else {
-        refList.innerHTML = todayMeals.map((meal, idx) => {
-          const reg = meal.studentRegistration || meal.student_registration;
-          const sObj = studentMapByReg.get(reg);
-          const rawName = meal.studentName || (sObj ? sObj.name : 'Aluno');
-          const rawGradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (meal.turma || '');
-          const rawTime = window.mealValidatorService.formatTimeString(meal.timestamp || meal.created_at);
+      if (!refList._absentDelegateBound && typeof refList.addEventListener === 'function') {
+        refList._absentDelegateBound = true;
+        refList.addEventListener('click', (ev) => {
+          const btn = ev.target && typeof ev.target.closest === 'function'
+            ? ev.target.closest('[data-absent-student-id]')
+            : null;
+          if (!btn) return;
+          const sId = btn.getAttribute('data-absent-student-id');
+          const sName = btn.getAttribute('data-absent-student-name') || '';
+          const sPos = parseInt(btn.getAttribute('data-absent-pos') || '0', 10) || null;
+          const svc = window.mealService || window.mealValidatorService;
+          if (sId && svc) {
+            svc.markStudentAbsentFromQueue(sId, sName, sPos);
+          }
+        });
+      }
 
-          const name = this._esc(rawName);
-          const gradeTurma = this._esc(rawGradeTurma);
-          const time = this._esc(rawTime);
+      if (rows.length === 0) {
+        refList.innerHTML = '<div class="tv-feed-empty">Nenhum aluno na fila do almoço hoje</div>';
+      } else {
+        refList.innerHTML = rows.map(r => {
+          const meal = queue.findMeal(r.entry);
+          const isNext = r.idx === queue.nextIdx;
+          const escId = this._esc(r.studentId);
+          let statusBadge;
+          if (meal) {
+            const mealTime = this._esc(mvs.formatTimeString(meal.timestamp || meal.created_at));
+            statusBadge = `<span class="badge badge-success">✓ Liberado • ${mealTime}</span>`;
+          } else if (queue.isAbsent && queue.isAbsent(r.entry)) {
+            statusBadge = '<span class="badge badge-danger">🚫 Ausente</span>';
+          } else if (queue.isExternal(r.entry)) {
+            statusBadge = '<span class="badge" style="background: rgba(59,130,246,0.2); color: #60a5fa;">🍱 Refeição externa</span>';
+          } else if (isNext) {
+            statusBadge = `<div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end;"><span class="badge badge-warning" style="font-weight: 800;">👉 Próximo da Vez • ⏳ Pendente</span><button type="button" class="btn btn-danger btn-sm" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;" data-absent-student-id="${escId}" data-absent-student-name="${r.name}" data-absent-pos="${r.pos}" title="Marcar ausência no almoço e liberar a fila">🚫 Marcar Ausência</button></div>`;
+          } else {
+            statusBadge = `<div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end;"><span class="badge badge-warning">⏳ Pendente</span><button type="button" class="btn btn-secondary btn-sm" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;" data-absent-student-id="${escId}" data-absent-student-name="${r.name}" data-absent-pos="${r.pos}" title="Marcar ausência no almoço">🚫 Marcar Ausência</button></div>`;
+          }
 
           return `
-            <div class="tv-feed-item ${idx === 0 ? 'tv-feed-item-new' : ''}">
-              <div class="tv-feed-item-name" title="${name}">${name}</div>
-              <div class="tv-feed-item-meta">
-                <div class="tv-feed-item-time">${time}</div>
-                <div>${gradeTurma}</div>
-              </div>
+            <div class="tv-feed-item ${isNext ? 'tv-feed-item-new' : ''}"${isNext ? ' data-tv-next="1" style="border-color: rgba(245, 158, 11, 0.6); background: rgba(245, 158, 11, 0.12);"' : ''}>
+              ${leftBlock(r)}
+              <div class="tv-feed-item-meta">${statusBadge}</div>
             </div>
           `;
         }).join('');
+
+        // Mantém o "próximo da vez" visível na lista rolável da TV
+        const nextEl = refList.querySelector('[data-tv-next]');
+        if (nextEl) {
+          refList.scrollTop += nextEl.getBoundingClientRect().top - refList.getBoundingClientRect().top - 8;
+        }
       }
     }
   }
@@ -414,25 +479,59 @@ class DashboardController {
     const tbody = document.getElementById('report-table-body');
     if (!tbody) return;
 
+    if (!tbody._absentDelegateBound && typeof tbody.addEventListener === 'function') {
+      tbody._absentDelegateBound = true;
+      tbody.addEventListener('click', async (ev) => {
+        const btn = ev.target && typeof ev.target.closest === 'function'
+          ? ev.target.closest('[data-absent-student-id]')
+          : null;
+        if (!btn) return;
+        const sId = btn.getAttribute('data-absent-student-id');
+        const sName = btn.getAttribute('data-absent-student-name') || '';
+        const sPos = parseInt(btn.getAttribute('data-absent-pos') || '0', 10) || null;
+        const svc = window.mealService || window.mealValidatorService;
+        if (sId && svc) {
+          const ok = await svc.markStudentAbsentFromQueue(sId, sName, sPos);
+          if (ok) await this.refreshDashboardForPeriod();
+        }
+      });
+    }
+
     const statusFilter = document.getElementById('report-filter-status')?.value || 'ALL';
     const searchQuery = (document.getElementById('audit-search')?.value || '').toLowerCase().trim();
     const todayStr = window.mealValidatorService.getTodayDateString();
+    const isTodayPeriod = (this.currentPeriod || 'today') === 'today';
 
     const allStudents = await window.studentService.getAllStudents();
     const activeStudents = allStudents.filter(s => s.active);
 
-    const mealsOnDate = await window.dbEngine.getAllByIndex('meal_logs', 'date', todayStr);
+    let mealsOnDate = [];
+    try {
+      if (window.mealValidatorService && typeof window.mealValidatorService._fetchTodayMealsRaw === 'function') {
+        mealsOnDate = await window.mealValidatorService._fetchTodayMealsRaw();
+      } else {
+        mealsOnDate = await window.dbEngine.getAllByIndex('meal_logs', 'date', todayStr);
+      }
+    } catch (e) {}
     const mealMapByReg = new Map(mealsOnDate.map(m => [m.studentRegistration || m.student_registration, m]));
 
     let entriesOnDate = [];
     try {
-      entriesOnDate = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', todayStr);
+      if (window.mealValidatorService && typeof window.mealValidatorService.getTodayOrderedEntries === 'function') {
+        entriesOnDate = await window.mealValidatorService.getTodayOrderedEntries();
+      } else {
+        entriesOnDate = await window.dbEngine.getAllByIndex('school_entries', 'entry_date', todayStr);
+      }
     } catch (e) {}
 
     const entryMapByStudentId = new Map();
-    entriesOnDate.forEach(e => {
+    const posMapByStudentId = new Map();
+    entriesOnDate.forEach((e, idx) => {
       const sId = e.student_id || e.studentId;
-      if (sId) entryMapByStudentId.set(sId, e);
+      if (sId) {
+        entryMapByStudentId.set(sId, e);
+        posMapByStudentId.set(sId, idx + 1);
+      }
     });
 
     // Justificativas do dia (alunos que informaram por que não almoçaram)
@@ -444,20 +543,32 @@ class DashboardController {
       }
     } catch (e) {}
 
+    const isAbsentRecord = (m) => {
+      if (!m) return false;
+      const st = String(m.mealStatus || m.meal_status || '').toLowerCase();
+      const mt = String(m.validationMethod || m.validation_method || '').toUpperCase();
+      return st === 'ausente' || mt === 'AUSENTE';
+    };
+
     let reportRows = activeStudents.map(student => {
       const meal = mealMapByReg.get(student.registration);
       const entry = entryMapByStudentId.get(student.id);
-      const isPresent = !!entry || !!meal;
+      const markedAbsent = isAbsentRecord(meal);
+      const isPresent = !!entry || (!!meal && !markedAbsent);
 
       return {
+        studentId: student.id,
+        queuePos: posMapByStudentId.get(student.id) || null,
+        hasGateEntry: !!entry,
         registration: student.registration,
         name: student.name,
         gradeTurma: `${student.grade} — ${student.turma}`,
         present: isPresent,
-        served: !!meal,
+        served: !!meal && !markedAbsent,
+        markedAbsent,
         entryTime: entry ? window.mealValidatorService.formatTimeString(entry.entry_time || entry.entryTime) : '—',
-        mealTime: meal ? window.mealValidatorService.formatTimeString(meal.timestamp) : '—',
-        method: meal ? (meal.validationMethod || meal.validation_method) : '—',
+        mealTime: meal && !markedAbsent ? window.mealValidatorService.formatTimeString(meal.timestamp) : '—',
+        method: meal && !markedAbsent ? (meal.validationMethod || meal.validation_method) : '—',
         mealStatus: meal ? (meal.mealStatus || meal.meal_status || null) : null,
         mealNotes: meal ? (meal.notes || null) : null,
         just: justMap.get(student.registration) || null
@@ -495,7 +606,9 @@ class DashboardController {
     tbody.innerHTML = reportRows.map(row => {
       // Determine the correct status badge
       let statusBadge;
-      if (row.served) {
+      if (row.markedAbsent) {
+        statusBadge = '<span class="badge badge-danger">🚫 AUSENTE NO ALMOÇO</span>';
+      } else if (row.served) {
         if (row.mealStatus === 'marmita') {
           statusBadge = '<span class="badge" style="background: rgba(59,130,246,0.2); color: #60a5fa;">🍱 MARMITA</span>';
         } else if (row.mealStatus === 'externa') {
@@ -516,6 +629,12 @@ class DashboardController {
         statusBadge = '<span class="badge badge-warning">⌛ PENDENTE</span>';
       }
 
+      const canMarkAbsent = isTodayPeriod && row.hasGateEntry && !row.served && !row.markedAbsent &&
+        !(row.just && (row.just.motivo === 'marmita' || row.just.motivo === 'externa'));
+      const absentBtn = canMarkAbsent
+        ? ` <button type="button" class="btn btn-danger btn-sm" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;" data-absent-student-id="${this._esc(row.studentId)}" data-absent-student-name="${this._esc(row.name)}" data-absent-pos="${this._esc(row.queuePos || '')}" title="Marcar ausência no almoço e liberar a fila">🚫 Marcar Ausência</button>`
+        : '';
+
       return `
       <tr>
         <td><strong>${this._esc(row.registration)}</strong></td>
@@ -523,7 +642,7 @@ class DashboardController {
         <td>${this._esc(row.gradeTurma)}</td>
         <td>${this._esc(row.entryTime)}</td>
         <td>${this._esc(row.mealTime)} ${row.method !== '—' ? `<small style="color: var(--text-dim);">(${this._esc(row.method)})</small>` : ''}</td>
-        <td>${statusBadge}</td>
+        <td><div style="display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">${statusBadge}${absentBtn}</div></td>
       </tr>
     `;
     }).join('');
@@ -563,7 +682,11 @@ class DashboardController {
       try { todayMeals = await window.dbEngine.getAllByIndex('meal_logs', 'date', todayStr); } catch(e) {}
 
       const presentCount = todayEntries.length;
-      const servedCount = todayMeals.length;
+      const servedCount = todayMeals.filter(m => {
+        const st = String(m.mealStatus || m.meal_status || '').toLowerCase();
+        const mt = String(m.validationMethod || m.validation_method || '').toUpperCase();
+        return st !== 'ausente' && mt !== 'AUSENTE' && st !== 'marmita' && st !== 'externa';
+      }).length;
       const notServedCount = Math.max(0, presentCount - servedCount);
       const absentCount = Math.max(0, totalActive - presentCount);
 
@@ -842,9 +965,15 @@ class DashboardController {
     });
 
     const isExternalStatus = (s) => s === 'marmita' || s === 'externa';
-    const servedMeals = meals.filter(m => !isExternalStatus(m.meal_status || m.mealStatus));
+    const isAbsentMealRecord = (m) => {
+      if (!m) return false;
+      const st = String(m.meal_status || m.mealStatus || '').toLowerCase();
+      const mt = String(m.validation_method || m.validationMethod || '').toUpperCase();
+      return st === 'ausente' || mt === 'AUSENTE';
+    };
+    const servedMeals = meals.filter(m => !isExternalStatus(m.meal_status || m.mealStatus) && !isAbsentMealRecord(m));
     const servedCount = servedMeals.length;
-    const externalFromLogs = meals.length - servedCount;
+    const externalFromLogs = meals.filter(m => isExternalStatus(m.meal_status || m.mealStatus)).length;
     const externalFromJust = [...justByReg.values()].filter(j => isExternalStatus(j.motivo)).length;
     const externalCount = externalFromLogs + externalFromJust;
     const adesao = presentRows.length > 0 ? (servedCount / presentRows.length) * 100 : 0;
@@ -854,15 +983,17 @@ class DashboardController {
     const rowsHtml = presentRows.map(r => {
       const c = this._classifyArrival(r.entryTime);
       const status = r.meal ? (r.meal.meal_status || r.meal.mealStatus) : null;
+      const absentRef = isAbsentMealRecord(r.meal);
       const just = justByReg.get(r.student.registration);
       let situacao;
-      if (r.meal && !isExternalStatus(status)) situacao = 'Almoçou no refeitório';
+      if (absentRef) situacao = 'Ausente no refeitório';
+      else if (r.meal && !isExternalStatus(status)) situacao = 'Almoçou no refeitório';
       else if (status === 'marmita' || (just && just.motivo === 'marmita')) situacao = 'Marmita';
       else if (status === 'externa' || (just && just.motivo === 'externa')) situacao = 'Comida externa';
       else if (just) situacao = `Justificou: ${just.motivo === 'outros' ? (just.notes || 'outros') : just.motivo}`;
       else situacao = 'Presente — não almoçou';
 
-      const mealTime = r.meal && !isExternalStatus(status) && r.meal.timestamp ? fmtTime(r.meal.timestamp) : '—';
+      const mealTime = r.meal && !absentRef && !isExternalStatus(status) && r.meal.timestamp ? fmtTime(r.meal.timestamp) : '—';
       const dayPrefix = multiDay ? `${fmtDay(r.entryDate)} ` : '';
       return `
         <tr>
