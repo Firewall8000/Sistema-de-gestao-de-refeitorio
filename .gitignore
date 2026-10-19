@@ -20,3 +20,6 @@ Thumbs.db
 
 # ARTEFATOS GERADOS PELO BUILD DA VERCEL
 public/
+
+# Ferramentas locais usadas para inspecionar as gravações (não publicar)
+.video-tools/

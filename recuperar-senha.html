@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex">
+  <title>Recuperar acesso — Santos Dumont</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <style>
+    body { min-height: 100vh; display: grid; place-items: center; padding: 1.25rem; }
+    main { width: 100%; max-width: 460px; }
+    h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+    p { margin-bottom: 1rem; overflow-wrap: anywhere; }
+    [hidden] { display: none !important; }
+    #recovery-status { margin-top: 1rem; }
+    a { color: var(--text-main); }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Recuperar acesso administrativo</h1>
+    <p id="recovery-intro">Solicite um link para cadastrar uma nova senha da conta administrativa.</p>
+    <form id="request-recovery">
+      <button class="btn btn-primary" type="submit" id="send-recovery">Enviar link de recuperação</button>
+    </form>
+    <form id="update-password" hidden>
+      <div class="form-group">
+        <label class="form-label" for="new-password">Nova senha</label>
+        <input class="form-control" id="new-password" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="confirm-password">Repita a nova senha</label>
+        <input class="form-control" id="confirm-password" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <p>Use pelo menos 8 caracteres. A senha deve atender também às regras de segurança da conta.</p>
+      <button class="btn btn-primary" type="submit" id="save-password">Salvar nova senha</button>
+    </form>
+    <p id="recovery-status" role="status" aria-live="polite">Preparando recuperação…</p>
+    <a href="./">Voltar ao sistema</a>
+    <noscript>Ative o JavaScript para recuperar sua senha.</noscript>
+  </main>
+  <!-- No analytics: recovery credentials must not enter telemetry. -->
+  <script src="js/runtime-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="js/admin-access.js"></script>
+  <script src="js/password-recovery.js"></script>
+</body>
+</html>

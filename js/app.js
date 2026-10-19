@@ -102,21 +102,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       const inputPassword = document.getElementById('input-admin-password');
       const errorMsg = document.getElementById('admin-auth-error');
       const passwordVal = inputPassword ? inputPassword.value : '';
-
-      const adminEmail = 'danielsandes05@gmail.com';
-
+      const submitButton = document.getElementById('btn-confirm-admin-auth');
+      if (submitButton?.disabled) return;
+      if (submitButton) submitButton.disabled = true;
       showLoadingModal('Autenticando com o servidor seguro...', 'Acesso Admin');
-
-      const { data, error } = await window.supabaseClient.auth.signInWithPassword({
-        email: adminEmail,
-        password: passwordVal
-      });
-
-      hideLoadingModal();
-
-      if (error || !data.session) {
+      try {
+        if (!window.supabaseClient) throw { code: 'config_missing' };
+        const { data, error } = await window.supabaseClient.auth.signInWithPassword({
+          email: window.ADMIN_EMAIL,
+          password: passwordVal
+        });
+        if (error) throw error;
+        if (!data?.session) throw { code: 'session_not_found' };
+      } catch (error) {
         if (errorMsg) {
-          errorMsg.textContent = 'Senha incorreta ou acesso não autorizado.';
+          errorMsg.textContent = window.authErrorMessage(error);
           errorMsg.style.display = 'block';
         }
         if (inputPassword) {
@@ -124,6 +124,9 @@ document.addEventListener('DOMContentLoaded', async () => {
           inputPassword.focus();
         }
         return;
+      } finally {
+        hideLoadingModal();
+        if (submitButton) submitButton.disabled = false;
       }
 
       // Sucesso: Ativa perfil ADMIN e fecha modal

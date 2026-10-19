@@ -10,7 +10,7 @@ const projectRoot = path.join(__dirname, '..');
 const outputDirectory = path.join(projectRoot, 'public');
 
 /*
- * Variáveis fornecidas exclusivamente pelo ambiente de Preview da Vercel.
+ * Variáveis do ambiente de publicação da Vercel (Production ou Preview).
  *
  * IMPORTANTE:
  * SUPABASE_SERVICE_ROLE_KEY NÃO DEVE existir aqui.
@@ -91,6 +91,7 @@ const frontendDirectories = [
 const frontendFiles = [
   'index.html',
   'carteirinha.html',
+  'recuperar-senha.html',
   'manifest.json',
   'manifest-carteirinha.json',
   'sw.js'
