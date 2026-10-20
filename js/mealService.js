@@ -646,13 +646,13 @@ class MealValidatorService {
         success: false,
         title: 'FORA DA ORDEM DA FILA! (' + studentPos + 'º LUGAR)',
         detail: `${student.name} — ${student.grade} (${student.turma})`,
-        sub: `A vez atual é do ${nextPos}º da fila: ${nextEntry.student_name || 'Aluno'} (${nextEntry.turma || ''}).`
+        sub: `A vez atual é do ${nextPos}º da fila: ${window.studentService.getDisplayName(nextEntry, lockStudentMap.get(nextEntry.student_id || nextEntry.studentId))} (${nextEntry.turma || ''}).`
       });
 
       if (typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: 'Aguarde a sua Vez na Fila',
-          message: `O aluno ${student.name} está na ${studentPos}ª colocação de chegada.\n\nNo momento, o leitor aguarda o ${nextPos}º da fila:\n👉 ${nextEntry.student_name || 'Aluno'} (${nextEntry.turma || ''})\n\nO atendimento segue rigorosamente a ordem de chegada na escola.`,
+          message: `O aluno ${student.name} está na ${studentPos}ª colocação de chegada.\n\nNo momento, o leitor aguarda o ${nextPos}º da fila:\n👉 ${window.studentService.getDisplayName(nextEntry, lockStudentMap.get(nextEntry.student_id || nextEntry.studentId))} (${nextEntry.turma || ''})\n\nO atendimento segue rigorosamente a ordem de chegada na escola.`,
           type: 'warning'
         });
       }
@@ -728,7 +728,7 @@ class MealValidatorService {
       if (queue.isAbsent(nextCand)) {
         const candId = nextCand.student_id || nextCand.studentId;
         const candStudent = lockStudentMap.get(candId);
-        const candName = nextCand.student_name || (candStudent ? candStudent.name : 'Aluno');
+        const candName = window.studentService.getDisplayName(nextCand, candStudent);
         skippedAbsent.push(`${scanIdx + 1}º (${candName})`);
         scanIdx++;
       } else if (queue.findMeal(nextCand) || queue.isExternal(nextCand)) {
@@ -795,7 +795,7 @@ class MealValidatorService {
 
     if (!entry && !student) return false;
 
-    const studentName = passedName || (entry && entry.student_name) || (student ? student.name : 'Aluno');
+    const studentName = window.studentService.getDisplayName(entry || { student_name: passedName }, student);
     const registration = (student && student.registration) || (entry && (entry.student_registration || entry.registration)) || studentId;
     const turma = (student && student.turma) || (entry && entry.turma) || '—';
     const grade = (student && student.grade) || (entry && entry.grade) || '—';
@@ -938,6 +938,7 @@ class MealValidatorService {
    * 1º no topo até o último embaixo, apenas para visualização de status (sem botões de ausência).
    */
   async renderScannerQueueList() {
+    const revision = this._scannerQueueRevision = (this._scannerQueueRevision || 0) + 1;
     const tbody = document.getElementById('scanner-queue-tbody');
     const summaryEl = document.getElementById('scanner-queue-summary');
     if (!tbody && !summaryEl) return;
@@ -951,6 +952,7 @@ class MealValidatorService {
 
     const studentMapById = new Map((allStudents || []).map(s => [s.id, s]));
     const queue = this._computeQueueState(orderedEntries, rawMeals, studentMapById);
+    if (revision !== this._scannerQueueRevision) return;
 
     const servedCount = orderedEntries.filter(e => !!queue.findMeal(e)).length;
     const externalCount = orderedEntries.filter(e => !queue.findMeal(e) && queue.isExternal(e)).length;
@@ -983,7 +985,7 @@ class MealValidatorService {
       const sId = entry.student_id || entry.studentId;
       const sObj = studentMapById.get(sId);
       const registration = sObj ? sObj.registration : (entry.student_registration || entry.registration || '—');
-      const name = entry.student_name || (sObj ? sObj.name : 'Aluno');
+      const name = window.studentService.getDisplayName(entry, sObj);
       const gradeTurma = sObj ? `${sObj.grade} — ${sObj.turma}` : (entry.turma || '—');
       const entryTime = this.formatTimeString(entry.entry_time || entry.entryTime);
 

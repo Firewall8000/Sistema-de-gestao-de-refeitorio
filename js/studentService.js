@@ -5,6 +5,11 @@
 
 class StudentService {
 
+  // A chegada é histórica; o nome exibido vem do cadastro atual.
+  getDisplayName(entry, student) {
+    return student?.name || entry?.student_name || entry?.studentName || 'Aluno';
+  }
+
   /**
    * Generates a unique crypto hash token for student QR Code.
    */
@@ -20,6 +25,7 @@ class StudentService {
     if (!data) return null;
     if (Array.isArray(data)) return data.map(item => this._mapFromSupabase(item));
     return {
+      ...data,
       id: data.id,
       name: data.name,
       registration: data.registration,
@@ -145,29 +151,51 @@ class StudentService {
   async saveStudent(studentData) {
     const { id, name, registration, grade, turma } = studentData;
 
+    // Edições não podem recriar alunos nem substituir QR, foto, vínculo de
+    // aparelho ou campos que não fazem parte deste formulário.
+    if (id) {
+      if (!navigator.onLine || !window.supabaseClient) {
+        throw new Error('Conecte-se à internet para corrigir o cadastro. Nenhuma alteração foi salva.');
+      }
+      let result;
+      try {
+        result = await window.supabaseClient.from('students')
+          .update({
+            name: name.trim(),
+            registration: registration.trim(),
+            grade,
+            turma: turma.trim(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', id)
+          .select('*')
+          .single();
+      } catch (error) {
+        throw new Error('Não foi possível confirmar a alteração no servidor. Verifique a conexão e consulte o cadastro antes de tentar novamente.');
+      }
+      if (result.error || !result.data || result.data.id !== id) {
+        if (result.error?.code === '23505') {
+          throw new Error('Esta matrícula já pertence a outro aluno.');
+        }
+        throw new Error('O servidor não confirmou a alteração. Verifique a permissão de edição e se o aluno ainda existe.');
+      }
+      const saved = this._mapFromSupabase(result.data);
+      try {
+        await window.dbEngine.put('students', saved);
+      } catch (error) {
+        // A gravação remota já foi confirmada. Não anunciar falha de salvamento.
+        console.warn('Cadastro salvo no servidor; não foi possível atualizar o cache local.');
+      }
+      return saved;
+    }
+
     // Check duplicate registration
     const existing = await this.getByRegistration(registration);
     if (existing && existing.id !== id) {
       throw new Error(`A matrícula "${registration}" já está cadastrada para outro aluno.`);
     }
 
-    let studentObj = null;
-
-    if (id) {
-      const current = await window.dbEngine.get('students', id);
-      studentObj = {
-        ...(current || {}),
-        id,
-        name: name.trim(),
-        registration: registration.trim(),
-        grade,
-        turma: turma.trim(),
-        active: current ? current.active : true,
-        qrToken: current ? current.qrToken : this.generateQrToken(registration.trim()),
-        updatedAt: new Date().toISOString()
-      };
-    } else {
-      studentObj = {
+    const studentObj = {
         id: 'std-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
         name: name.trim(),
         registration: registration.trim(),
@@ -177,8 +205,7 @@ class StudentService {
         qrToken: this.generateQrToken(registration.trim()),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
-      };
-    }
+    };
 
     // Save in Supabase Cloud
     if (window.supabaseClient && navigator.onLine) {

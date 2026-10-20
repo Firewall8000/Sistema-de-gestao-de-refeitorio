@@ -40,11 +40,24 @@ class DashboardController {
         // Justificativas não têm Realtime (tabela protegida): atualiza a cada 30 s
         setInterval(() => {
           if (!document.hidden && document.getElementById('report-table-body')) this.loadAuditTable();
+          // Recupera alterações caso um evento Realtime tenha sido perdido.
+          if (!document.hidden && !this._queuePollPending) {
+            this._queuePollPending = true;
+            this.refreshLiveQueues().finally(() => { this._queuePollPending = false; });
+          }
         }, 30000);
       } catch (err) {
         console.warn('⚠️ Erro ao assinar Supabase Realtime no Dashboard:', err);
       }
     }
+  }
+
+  async refreshLiveQueues() {
+    await Promise.allSettled([
+      this.refreshTvFeed(),
+      this.loadLunchQueueTable(),
+      window.mealValidatorService?.renderScannerQueueList()
+    ]);
   }
 
   // ========================================================================
@@ -190,7 +203,7 @@ class DashboardController {
           return {
             id: entry.id,
             studentRegistration: sObj ? sObj.registration : (entry.student_registration || entry.registration || '—'),
-            studentName: entry.student_name || (sObj ? sObj.name : 'Aluno'),
+            studentName: window.studentService.getDisplayName(entry, sObj),
             gradeTurma: sObj ? `${sObj.grade} — ${sObj.turma}` : (entry.turma || '—'),
             entryTime: entry.entry_time || entry.entryTime
           };
@@ -295,6 +308,7 @@ class DashboardController {
 
   async refreshTvFeed() {
     if (!window.mealValidatorService) return;
+    const revision = this._tvFeedRevision = (this._tvFeedRevision || 0) + 1;
     const mvs = window.mealValidatorService;
 
     // 1. Entradas de hoje em ordem CRESCENTE de chegada (entry_time ASC): 1º no topo.
@@ -319,6 +333,7 @@ class DashboardController {
 
     const studentMap = new Map((allStudents || []).map(s => [s.id, s]));
     const queue = mvs._computeQueueState(todayEntries, rawMeals, studentMap);
+    if (revision !== this._tvFeedRevision) return;
 
     // Contadores da TV
     const presentCount = todayEntries.length;
@@ -344,7 +359,7 @@ class DashboardController {
       const pos = idx + 1;
       const studentId = entry.student_id || entry.studentId || '';
       const sObj = studentMap.get(studentId);
-      const rawName = entry.student_name || (sObj ? sObj.name : 'Aluno');
+      const rawName = window.studentService.getDisplayName(entry, sObj);
       return {
         entry,
         idx,

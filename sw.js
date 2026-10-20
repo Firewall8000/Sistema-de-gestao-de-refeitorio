@@ -5,7 +5,7 @@
 
 const CACHE_PREFIX = 'cesd-refectory-';
 // 1. Mudamos a versão para v3.5.0 para forçar o navegador a atualizar os ativos com o Sentry
-const CACHE_NAME = `${CACHE_PREFIX}v3.5.1`;
+const CACHE_NAME = `${CACHE_PREFIX}v3.5.3`;
 
 const ASSETS_TO_CACHE = [
   './',
@@ -31,6 +31,7 @@ const ASSETS_TO_CACHE = [
   './js/audio.js',
   './js/scanner.js',
   './js/dashboard.js',
+  './js/queuePrint.js',
   './js/sync.js'
 ];
 

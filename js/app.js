@@ -257,7 +257,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         await window.studentService.saveStudent({ id, name: cleanName, registration: cleanRegistration, grade, turma });
         hideLoadingModal();
         closeStudentModal();
-        renderStudentsTable();
+        await refreshAllUI();
         await showAlertModal({
           title: 'Aluno Salvo',
           message: `O cadastro do aluno "${cleanName}" foi salvo com sucesso!`,
@@ -529,7 +529,11 @@ async function refreshAllUI() {
     window.dashboardController.initRealtimeSubscription();
     window.dashboardController.startTvClock();
   }
-  renderStudentsTable();
+  // Também usado pelo evento Realtime de students nos outros dispositivos.
+  await Promise.allSettled([
+    renderStudentsTable(),
+    window.dashboardController?.refreshLiveQueues()
+  ]);
 }
 
 function updateModalTurmaOptions(selectedGrade, currentTurma = '') {

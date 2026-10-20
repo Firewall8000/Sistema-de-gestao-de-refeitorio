@@ -289,6 +289,10 @@
           <div class="tv-clock" id="tv-clock">00:00:00</div>
         </div>
 
+        <div id="queue-print-controls" style="display: none; margin-bottom: 1rem;">
+          <button type="button" class="btn btn-secondary" id="btn-open-queue-print">🖨️ Imprimir colocações por turma</button>
+        </div>
+
         <!-- TV Top Counters -->
         <div class="tv-counters">
           <div class="tv-counter-card">
@@ -494,6 +498,21 @@
     </div>
   </div>
 
+  <div id="modal-queue-print" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="queue-print-title">
+    <div class="modal-box" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 id="queue-print-title" class="card-title">Imprimir colocações por turma</h3>
+        <button type="button" class="modal-close-btn" id="btn-close-queue-print" aria-label="Fechar">&times;</button>
+      </div>
+      <p style="margin-bottom: 1rem;">Folhas para as portas das salas, com a posição de cada aluno na fila geral. Cada turma começa em uma nova página.</p>
+      <label class="form-label" for="queue-print-class">Turma</label>
+      <select id="queue-print-class" class="form-control" disabled></select>
+      <p id="queue-print-status" role="status" aria-live="polite" style="margin: 1rem 0;"></p>
+      <p style="color: var(--text-muted); margin-bottom: 1rem;">Confira se os registros da portaria estão sincronizados antes de imprimir.</p>
+      <button type="button" class="btn btn-primary" id="btn-preview-queue-print" disabled>Abrir prévia de impressão</button>
+    </div>
+  </div>
+
   <!-- MODAL: Confirmação do Sistema -->
   <div id="modal-confirm" class="modal-backdrop">
     <div class="modal-box" style="max-width: 440px; text-align: center;">
@@ -558,6 +577,7 @@
   <script src="js/mealService.js"></script>
   <script src="js/sync.js"></script>
   <script src="js/dashboard.js"></script>
+  <script src="js/queuePrint.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

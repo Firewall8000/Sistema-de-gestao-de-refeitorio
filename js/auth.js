@@ -52,6 +52,9 @@ class AuthManager {
     const tabStudents = document.getElementById('tab-btn-students');
     const tabTv = document.getElementById('tab-btn-tv');
     const tabDashboard = document.getElementById('tab-btn-dashboard');
+    const printControls = document.getElementById('queue-print-controls');
+    if (printControls) printControls.style.display = this.isAdmin() ? 'block' : 'none';
+    if (!this.isAdmin() && window.queuePrintController) window.queuePrintController.close();
 
     if (roleLabel) {
       roleLabel.textContent = this.isAdmin() ? 'Diretoria / Admin' : 'Leitura / Refeitório';
