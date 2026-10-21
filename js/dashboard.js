@@ -397,68 +397,36 @@ class DashboardController {
               <div class="tv-feed-item-meta">
                 <div class="tv-feed-item-time">${time}</div>
                 <div>Portaria</div>
+                ${queue.isAbsent(r.entry) ? '<span class="badge badge-danger">🚫 Saiu sem almoçar</span>' :
+                  (!queue.findMeal(r.entry) && !queue.isExternal(r.entry) ? this._absenceButton(r.studentId) : '')}
               </div>
             </div>
           `;
         }).join('');
+        this._bindAbsenceButtons(portariaList);
       }
     }
 
-    // Coluna da Direita: mesma ordem, com status no refeitório (Pendente / Liberado / Ausente)
-    // e botão exclusivo da Coordenação/Diretoria para marcar ausência de alunos pendentes.
+    // Coluna da Direita: apenas os alunos que já tiveram o almoço liberado hoje,
+    // com o selo da colocação de chegada (sem pendentes e sem botões de ação).
     const refList = document.getElementById('tv-feed-refeitorio-list');
     if (refList) {
-      if (!refList._absentDelegateBound && typeof refList.addEventListener === 'function') {
-        refList._absentDelegateBound = true;
-        refList.addEventListener('click', (ev) => {
-          const btn = ev.target && typeof ev.target.closest === 'function'
-            ? ev.target.closest('[data-absent-student-id]')
-            : null;
-          if (!btn) return;
-          const sId = btn.getAttribute('data-absent-student-id');
-          const sName = btn.getAttribute('data-absent-student-name') || '';
-          const sPos = parseInt(btn.getAttribute('data-absent-pos') || '0', 10) || null;
-          const svc = window.mealService || window.mealValidatorService;
-          if (sId && svc) {
-            svc.markStudentAbsentFromQueue(sId, sName, sPos);
-          }
-        });
-      }
+      const servedRows = rows
+        .map(r => ({ r, meal: queue.findMeal(r.entry) }))
+        .filter(x => !!x.meal);
 
-      if (rows.length === 0) {
-        refList.innerHTML = '<div class="tv-feed-empty">Nenhum aluno na fila do almoço hoje</div>';
+      if (servedRows.length === 0) {
+        refList.innerHTML = '<div class="tv-feed-empty">Nenhum almoço registrado hoje</div>';
       } else {
-        refList.innerHTML = rows.map(r => {
-          const meal = queue.findMeal(r.entry);
-          const isNext = r.idx === queue.nextIdx;
-          const escId = this._esc(r.studentId);
-          let statusBadge;
-          if (meal) {
-            const mealTime = this._esc(mvs.formatTimeString(meal.timestamp || meal.created_at));
-            statusBadge = `<span class="badge badge-success">✓ Liberado • ${mealTime}</span>`;
-          } else if (queue.isAbsent && queue.isAbsent(r.entry)) {
-            statusBadge = '<span class="badge badge-danger">🚫 Ausente</span>';
-          } else if (queue.isExternal(r.entry)) {
-            statusBadge = '<span class="badge" style="background: rgba(59,130,246,0.2); color: #60a5fa;">🍱 Refeição externa</span>';
-          } else if (isNext) {
-            statusBadge = `<div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end;"><span class="badge badge-warning" style="font-weight: 800;">👉 Próximo da Vez • ⏳ Pendente</span><button type="button" class="btn btn-danger btn-sm" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;" data-absent-student-id="${escId}" data-absent-student-name="${r.name}" data-absent-pos="${r.pos}" title="Marcar ausência no almoço e liberar a fila">🚫 Marcar Ausência</button></div>`;
-          } else {
-            statusBadge = `<div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; justify-content: flex-end;"><span class="badge badge-warning">⏳ Pendente</span><button type="button" class="btn btn-secondary btn-sm" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;" data-absent-student-id="${escId}" data-absent-student-name="${r.name}" data-absent-pos="${r.pos}" title="Marcar ausência no almoço">🚫 Marcar Ausência</button></div>`;
-          }
-
+        refList.innerHTML = servedRows.map(({ r, meal }) => {
+          const mealTime = this._esc(mvs.formatTimeString(meal.timestamp || meal.created_at));
           return `
-            <div class="tv-feed-item ${isNext ? 'tv-feed-item-new' : ''}"${isNext ? ' data-tv-next="1" style="border-color: rgba(245, 158, 11, 0.6); background: rgba(245, 158, 11, 0.12);"' : ''}>
+            <div class="tv-feed-item">
               ${leftBlock(r)}
-              <div class="tv-feed-item-meta">${statusBadge}</div>
+              <div class="tv-feed-item-meta"><span class="badge badge-success">✓ Liberado • ${mealTime}</span></div>
             </div>
           `;
         }).join('');
-
-        // Mantém o "próximo da vez" visível na lista rolável da TV
-        const nextEl = refList.querySelector('[data-tv-next]');
-        if (nextEl) {
-          refList.scrollTop += nextEl.getBoundingClientRect().top - refList.getBoundingClientRect().top - 8;
-        }
       }
     }
   }
@@ -466,6 +434,24 @@ class DashboardController {
   // ========================================================================
   //  AUDIT TABLE (Dashboard)
   // ========================================================================
+
+  _absenceButton(studentId) {
+    if (!window.authManager?.isAdmin()) return '';
+    return `<button type="button" class="btn btn-danger btn-sm" data-absence-student="${this._esc(studentId)}" title="Registrar saída confirmada da escola sem almoço">🚫 Marcar Ausência</button>`;
+  }
+
+  _bindAbsenceButtons(container) {
+    container.onclick = async event => {
+      const button = event.target.closest('[data-absence-student]');
+      if (!button || !container.contains(button) || button.disabled) return;
+      button.disabled = true;
+      try {
+        await window.mealValidatorService.markStudentAbsentFromQueue(button.dataset.absenceStudent);
+      } finally {
+        button.disabled = false;
+      }
+    };
+  }
 
   _esc(v) {
     return String(v == null ? '' : v)
@@ -494,28 +480,9 @@ class DashboardController {
     const tbody = document.getElementById('report-table-body');
     if (!tbody) return;
 
-    if (!tbody._absentDelegateBound && typeof tbody.addEventListener === 'function') {
-      tbody._absentDelegateBound = true;
-      tbody.addEventListener('click', async (ev) => {
-        const btn = ev.target && typeof ev.target.closest === 'function'
-          ? ev.target.closest('[data-absent-student-id]')
-          : null;
-        if (!btn) return;
-        const sId = btn.getAttribute('data-absent-student-id');
-        const sName = btn.getAttribute('data-absent-student-name') || '';
-        const sPos = parseInt(btn.getAttribute('data-absent-pos') || '0', 10) || null;
-        const svc = window.mealService || window.mealValidatorService;
-        if (sId && svc) {
-          const ok = await svc.markStudentAbsentFromQueue(sId, sName, sPos);
-          if (ok) await this.refreshDashboardForPeriod();
-        }
-      });
-    }
-
     const statusFilter = document.getElementById('report-filter-status')?.value || 'ALL';
     const searchQuery = (document.getElementById('audit-search')?.value || '').toLowerCase().trim();
     const todayStr = window.mealValidatorService.getTodayDateString();
-    const isTodayPeriod = (this.currentPeriod || 'today') === 'today';
 
     const allStudents = await window.studentService.getAllStudents();
     const activeStudents = allStudents.filter(s => s.active);
@@ -622,7 +589,7 @@ class DashboardController {
       // Determine the correct status badge
       let statusBadge;
       if (row.markedAbsent) {
-        statusBadge = '<span class="badge badge-danger">🚫 AUSENTE NO ALMOÇO</span>';
+        statusBadge = '<span class="badge badge-danger">🚫 SAIU SEM ALMOÇAR</span>';
       } else if (row.served) {
         if (row.mealStatus === 'marmita') {
           statusBadge = '<span class="badge" style="background: rgba(59,130,246,0.2); color: #60a5fa;">🍱 MARMITA</span>';
@@ -644,12 +611,6 @@ class DashboardController {
         statusBadge = '<span class="badge badge-warning">⌛ PENDENTE</span>';
       }
 
-      const canMarkAbsent = isTodayPeriod && row.hasGateEntry && !row.served && !row.markedAbsent &&
-        !(row.just && (row.just.motivo === 'marmita' || row.just.motivo === 'externa'));
-      const absentBtn = canMarkAbsent
-        ? ` <button type="button" class="btn btn-danger btn-sm" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;" data-absent-student-id="${this._esc(row.studentId)}" data-absent-student-name="${this._esc(row.name)}" data-absent-pos="${this._esc(row.queuePos || '')}" title="Marcar ausência no almoço e liberar a fila">🚫 Marcar Ausência</button>`
-        : '';
-
       return `
       <tr>
         <td><strong>${this._esc(row.registration)}</strong></td>
@@ -657,10 +618,11 @@ class DashboardController {
         <td>${this._esc(row.gradeTurma)}</td>
         <td>${this._esc(row.entryTime)}</td>
         <td>${this._esc(row.mealTime)} ${row.method !== '—' ? `<small style="color: var(--text-dim);">(${this._esc(row.method)})</small>` : ''}</td>
-        <td><div style="display: inline-flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">${statusBadge}${absentBtn}</div></td>
+        <td>${statusBadge} ${row.hasGateEntry && !row.served && !row.markedAbsent ? this._absenceButton(row.studentId) : ''}</td>
       </tr>
     `;
     }).join('');
+    this._bindAbsenceButtons(tbody);
   }
 
   // ========================================================================

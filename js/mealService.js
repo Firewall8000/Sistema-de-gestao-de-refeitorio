@@ -627,9 +627,10 @@ class MealValidatorService {
       return false;
     }
 
-    // TRAVA DE BARRAMENTO ESTRITO SEQUENCIAL (1 POR 1):
-    // só libera o primeiro aluno da ordem de chegada que ainda está "Pendente".
-    // (refeições presenciais de hoje = getTodayMealsAll(); marmita/externa não travam a fila)
+    // DETECÇÃO DE FURA-FILA (sem bloqueio):
+    // o almoço é liberado normalmente, mas se existir um aluno que chegou antes
+    // e ainda está "Pendente", o leitor exibe um alerta com a posição do aluno.
+    // (marmita/externa/ausente não contam como pendentes)
     const rawMeals = await this._fetchTodayMealsRaw();
     const lockStudentMap = new Map([[student.id, student]]);
     try {
@@ -640,24 +641,10 @@ class MealValidatorService {
     const nextIdx = queue.nextIdx;
     const nextEntry = nextIdx !== -1 ? orderedEntries[nextIdx] : null;
     const nextPos = nextIdx + 1;
-
-    if (nextEntry && (nextEntry.student_id || nextEntry.studentId) !== student.id) {
-      this.displayValidationResult({
-        success: false,
-        title: 'FORA DA ORDEM DA FILA! (' + studentPos + 'º LUGAR)',
-        detail: `${student.name} — ${student.grade} (${student.turma})`,
-        sub: `A vez atual é do ${nextPos}º da fila: ${window.studentService.getDisplayName(nextEntry, lockStudentMap.get(nextEntry.student_id || nextEntry.studentId))} (${nextEntry.turma || ''}).`
-      });
-
-      if (typeof window.showAlertModal === 'function') {
-        await window.showAlertModal({
-          title: 'Aguarde a sua Vez na Fila',
-          message: `O aluno ${student.name} está na ${studentPos}ª colocação de chegada.\n\nNo momento, o leitor aguarda o ${nextPos}º da fila:\n👉 ${window.studentService.getDisplayName(nextEntry, lockStudentMap.get(nextEntry.student_id || nextEntry.studentId))} (${nextEntry.turma || ''})\n\nO atendimento segue rigorosamente a ordem de chegada na escola.`,
-          type: 'warning'
-        });
-      }
-      return { success: false, reason: 'out_of_order' };
-    }
+    const isCuttingLine = (nextIdx !== -1 && nextIdx < studentIdx);
+    const nextStudentName = nextEntry
+      ? window.studentService.getDisplayName(nextEntry, lockStudentMap.get(nextEntry.student_id || nextEntry.studentId))
+      : '';
 
     const nowIso = new Date().toISOString();
     const mealLog = {
@@ -749,11 +736,36 @@ class MealValidatorService {
         : `${skippedLabel} — fila concluída`;
     }
 
+    const formattedTime = this.formatTimeString(nowIso);
+
+    if (isCuttingLine) {
+      // Almoço liberado normalmente, porém com ALERTA de fura-fila
+      this.displayValidationResult({
+        success: true,
+        warning: true,
+        title: '⚠️ FUROU A FILA (' + studentPos + 'º DA FILA) — ALMOÇO LIBERADO ✓',
+        detail: `${student.name} — ${student.grade} ${student.turma} • Posição: ${studentPos}º lugar`,
+        sub: `Passou à frente do ${nextPos}º da fila (${nextStudentName}) • Almoço liberado às ${formattedTime}`
+      });
+
+      await this.updateTodayCounterUI();
+
+      if (typeof window.showAlertModal === 'function') {
+        await window.showAlertModal({
+          title: '⚠️ Furou a Fila (' + studentPos + 'º Lugar) — Almoço Liberado',
+          message: '⚠️ ALERTA: Este aluno está furando a fila!\n\n🏅 Posição dele na fila: ' + studentPos + 'º lugar ' + (studentPos > 150 ? '(2º Lote)' : '(1º Lote)') + '\n⏳ Vez na ordem de chegada: ' + nextPos + 'º lugar (' + nextStudentName + ')\n\n✅ Almoço LIBERADO normalmente para ' + student.name + ' (' + student.grade + ' - ' + student.turma + ') às ' + formattedTime + '.',
+          type: 'warning'
+        });
+      }
+
+      return { success: true, cuttingLine: true, position: studentPos, expectedPosition: nextPos };
+    }
+
     this.displayValidationResult({
       success: true,
-      title: 'ALMOÇO LIBERADO ✓ (' + studentPos + 'º DA FILA)',
+      title: 'ALMOÇO LIBERADO ✓ — ' + studentPos + 'º DA FILA',
       detail: `${student.name} — ${student.grade} ${student.turma}`,
-      sub: `${studentPos}º da fila • Matrícula: ${student.registration} • Liberado às ${this.formatTimeString(nowIso)} (${method})${skippedNotice ? ' • ' + skippedNotice : ''}`
+      sub: `${studentPos}º da fila • Matrícula: ${student.registration} • Liberado às ${formattedTime} (${method})${skippedNotice ? ' • ' + skippedNotice : ''}`
     });
 
     await this.updateTodayCounterUI();
@@ -761,7 +773,7 @@ class MealValidatorService {
     if (typeof window.showAlertModal === 'function') {
       await window.showAlertModal({
         title: 'Almoço Liberado',
-        message: `Almoço liberado com sucesso!\n\n🏅 Posição na Fila: ${studentPos}º lugar\nAluno: ${student.name}\nTurma: ${student.grade} - ${student.turma}\nHorário de Liberação: ${this.formatTimeString(nowIso)}${skippedNotice ? '\n\n⏭️ ' + skippedNotice : ''}`,
+        message: `Almoço liberado com sucesso!\n\n🏅 Posição na Fila: ${studentPos}º lugar ${studentPos > 150 ? '(2º Lote)' : '(1º Lote)'}\nAluno: ${student.name}\nTurma: ${student.grade} - ${student.turma}\nHorário de Liberação: ${formattedTime}${skippedNotice ? '\n\n⏭️ ' + skippedNotice : ''}`,
         type: 'success'
       });
     }
@@ -771,14 +783,13 @@ class MealValidatorService {
 
   /**
    * Marca um aluno da fila como AUSENTE no almoço (exclusivo Coordenação / Diretoria)
-   * para destravar a fila sequencial.
+   * após a equipe confirmar que ele saiu da escola sem almoçar.
    * Assinatura: markStudentAbsentFromQueue(studentId, studentName, position)
    */
   async markStudentAbsentFromQueue(studentId, studentNameArg = null, positionArg = null) {
-    if (!studentId) return false;
+    if (!studentId || !window.authManager?.isAdmin()) return false;
 
     const isOpts = studentNameArg && typeof studentNameArg === 'object';
-    const skipConfirm = isOpts ? !!studentNameArg.skipConfirm : false;
     const passedName = (!isOpts && typeof studentNameArg === 'string' && studentNameArg.trim()) ? studentNameArg.trim() : null;
     const passedPos = (!isOpts && Number.isFinite(Number(positionArg)) && Number(positionArg) > 0) ? Number(positionArg) : null;
 
@@ -793,7 +804,7 @@ class MealValidatorService {
       student = (allStudents || []).find(s => s.id === studentId) || null;
     } catch (e) {}
 
-    if (!entry && !student) return false;
+    if (!entry) return false;
 
     const studentName = window.studentService.getDisplayName(entry || { student_name: passedName }, student);
     const registration = (student && student.registration) || (entry && (entry.student_registration || entry.registration)) || studentId;
@@ -802,19 +813,23 @@ class MealValidatorService {
     const qrToken = (student && student.qrToken) || 'AUSENTE';
     const posLabel = studentPos ? `${studentPos}º da fila — ` : '';
 
-    if (!skipConfirm && typeof window.showConfirmModal === 'function') {
+    if (typeof window.showConfirmModal !== 'function') return false;
+    const todayStr = this.getTodayDateString();
+    if (await this.getTodayMealForStudent(registration)) return false;
+    {
       const confirmed = await window.showConfirmModal({
-        title: 'Confirmar Ausência na Fila',
-        message: `Deseja marcar o aluno ${studentName} (${posLabel}${grade} ${turma}) como AUSENTE no almoço?\n\nA vez passará automaticamente para o próximo aluno pendente da fila.`,
+        title: 'Confirmar saída sem almoço',
+        message: `A equipe confirmou que ${studentName} (${posLabel}${grade} ${turma}) foi embora da escola sem almoçar?\n\nMarque somente se a saída foi confirmada. Estar atrasado ou ainda não ter vindo ao refeitório não significa ausência. O registro de chegada e a colocação serão preservados. Esta marcação impede o almoço deste aluno hoje; os demais continuam liberados.`,
         icon: '🚫',
-        confirmText: 'Sim, Marcar Ausência',
+        confirmText: 'Sim, saiu sem almoçar',
         cancelText: 'Cancelar',
         isDanger: true
       });
       if (!confirmed) return false;
     }
 
-    const todayStr = this.getTodayDateString();
+    if (!window.authManager?.isAdmin() || todayStr !== this.getTodayDateString()) return false;
+    if (await this.getTodayMealForStudent(registration)) return false;
     const nowIso = new Date().toISOString();
     const absentLog = {
       id: 'absent-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -826,7 +841,7 @@ class MealValidatorService {
       date: todayStr,
       timestamp: nowIso,
       qrTokenUsed: qrToken,
-      synced: navigator.onLine,
+      synced: false,
       validationMethod: 'AUSENTE',
       mealStatus: 'ausente'
     };
@@ -846,15 +861,24 @@ class MealValidatorService {
           synced: true,
           validation_method: 'AUSENTE'
         };
-        await window.supabaseClient.from('meal_logs').insert(row);
+        const { error } = await window.supabaseClient.from('meal_logs').insert(row);
+        if (error) throw error;
+        absentLog.synced = true;
       } catch (err) {
         console.warn('⚠️ Falha ao registrar ausência na fila no Supabase:', err);
+        await window.showAlertModal?.({ title: 'Ausência não registrada', message: 'Não foi possível confirmar a saída. Atualize os dados e tente novamente.', type: 'danger' });
+        return false;
       }
     }
 
     try {
       await window.dbEngine.put('meal_logs', absentLog);
-    } catch (e) {}
+    } catch (e) {
+      if (!absentLog.synced) {
+        await window.showAlertModal?.({ title: 'Ausência não registrada', message: 'Não foi possível salvar a saída neste aparelho. Tente novamente.', type: 'danger' });
+        return false;
+      }
+    }
 
     await this.updateTodayCounterUI();
     if (window.dashboardController) {
@@ -867,8 +891,9 @@ class MealValidatorService {
 
   /**
    * Renders the validation banner overlay and plays synthetic audio feedback.
+   * warning: true = aviso (âmbar) sem bloqueio — ex.: almoço liberado, mas aluno furou a fila.
    */
-  displayValidationResult({ success, title, detail, sub }) {
+  displayValidationResult({ success, warning = false, title, detail, sub }) {
     const banner = document.getElementById('validation-banner');
     const icon = document.getElementById('val-icon');
     const titleEl = document.getElementById('val-title');
@@ -879,7 +904,27 @@ class MealValidatorService {
 
     banner.style.display = 'flex';
 
-    if (success) {
+    // Limpa estilos inline de aviso de uma leitura anterior
+    banner.style.background = '';
+    banner.style.border = '';
+    banner.style.boxShadow = '';
+    banner.style.animation = '';
+    if (icon) { icon.style.background = ''; icon.style.color = ''; }
+    if (titleEl) titleEl.style.color = '';
+
+    if (warning) {
+      banner.className = 'validation-banner warning';
+      banner.style.background = 'linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(16, 185, 129, 0.15))';
+      banner.style.border = '2px solid var(--color-warning, #f59e0b)';
+      banner.style.boxShadow = '0 0 30px rgba(245, 158, 11, 0.55)';
+      if (icon) {
+        icon.textContent = '⚠';
+        icon.style.background = 'var(--color-warning, #f59e0b)';
+        icon.style.color = '#ffffff';
+      }
+      if (titleEl) titleEl.style.color = 'var(--color-warning, #f59e0b)';
+      if (window.audioFeedback) window.audioFeedback.playErrorSound();
+    } else if (success) {
       banner.className = 'validation-banner success';
       if (icon) icon.textContent = '✓';
       if (window.audioFeedback) window.audioFeedback.playSuccessSound();

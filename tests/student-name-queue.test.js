@@ -124,15 +124,72 @@ test('corrected name appears in both TV columns, scanner and legacy fallback; th
   const h = setup();
   await h.edit();
   await h.d.refreshLiveQueues();
-  for (const id of ['tv-feed-portaria-list', 'tv-feed-refeitorio-list', 'scanner-queue-tbody', 'lunch-queue-table-body']) {
+  for (const id of ['tv-feed-portaria-list', 'scanner-queue-tbody', 'lunch-queue-table-body']) {
     const html = h.node(id).innerHTML;
     assert.ok(html.includes('Nome Corrigido'), id);
     assert.ok(!html.includes('Nome Antigo'), id);
   }
-  for (const id of ['tv-feed-portaria-list', 'tv-feed-refeitorio-list', 'scanner-queue-tbody']) {
+  for (const id of ['tv-feed-portaria-list', 'scanner-queue-tbody']) {
     const html = h.node(id).innerHTML;
     assert.ok(html.indexOf('Aluno 2') < html.indexOf('Nome Corrigido'), id);
     assert.ok(html.indexOf('Nome Corrigido') < html.indexOf('Aluno 4'), id);
+  }
+  assert.ok(!h.node('tv-feed-refeitorio-list').innerHTML.includes('Nome Corrigido'));
+  h.cloud.meal_logs.push({ student_id: 's3', validation_method: 'QR_CODE', timestamp: '2026-10-20T15:00:00Z' });
+  await h.d.refreshTvFeed();
+  assert.match(h.node('tv-feed-refeitorio-list').innerHTML, /Nome Corrigido/);
+  assert.doesNotMatch(h.node('tv-feed-refeitorio-list').innerHTML, /Nome Antigo/);
+});
+
+test('absence buttons are admin-only, only for pending arrivals, never in served column', async () => {
+  const h = setup();
+  h.window.authManager = { isAdmin: () => true };
+  await h.d.refreshTvFeed();
+  const html = h.node('tv-feed-portaria-list').innerHTML;
+  assert.match(html, /data-absence-student="s3"/);
+  assert.doesNotMatch(html, /data-absence-student="s[12]"/);
+  assert.doesNotMatch(h.node('tv-feed-refeitorio-list').innerHTML, /data-absence-student/);
+  h.window.authManager.isAdmin = () => false;
+  await h.d.refreshTvFeed();
+  assert.doesNotMatch(h.node('tv-feed-portaria-list').innerHTML, /data-absence-student/);
+});
+
+test('confirmed departure preserves arrival data and writes absence only after confirmation', async () => {
+  const h = setup();
+  const before = clone(h.cloud.school_entries);
+  const saved = [];
+  h.window.authManager = { isAdmin: () => true };
+  h.m.getTodayMealForStudent = async () => null;
+  h.m.updateTodayCounterUI = async () => {};
+  h.window.dashboardController = null;
+  h.window.supabaseClient.from = () => ({ insert: async row => { saved.push(row); return { error: null }; } });
+  h.window.showConfirmModal = async config => {
+    assert.match(config.message, /foi embora da escola sem almoçar/);
+    assert.equal(saved.length, 0);
+    return true;
+  };
+  h.m.getTodayOrderedEntries = async () => before;
+  h.window.studentService.getAllStudents = async () => h.cloud.students;
+  assert.equal(await h.m.markStudentAbsentFromQueue('s3'), true);
+  assert.equal(saved.length, 1);
+  assert.equal(saved[0].validation_method, 'AUSENTE');
+  assert.deepEqual(h.cloud.school_entries, before);
+});
+
+test('absence refuses cancellation, missing arrival, existing meal and database rejection', async () => {
+  for (const scenario of ['cancel', 'no-entry', 'served', 'error', 'operator']) {
+    const h = setup();
+    let writes = 0;
+    h.window.authManager = { isAdmin: () => scenario !== 'operator' };
+    h.m.getTodayOrderedEntries = async () => scenario === 'no-entry' ? [] : h.cloud.school_entries;
+    h.window.studentService.getAllStudents = async () => h.cloud.students;
+    h.m.getTodayMealForStudent = async () => scenario === 'served' ? { id: 'existing' } : null;
+    h.window.showConfirmModal = async () => scenario !== 'cancel';
+    h.window.showAlertModal = async () => {};
+    h.window.supabaseClient.from = () => ({ insert: async () => ({ error: { code: '23505' } }) });
+    h.window.dbEngine.put = async () => { writes++; };
+    assert.equal(await h.m.markStudentAbsentFromQueue('s3'), false, scenario);
+    assert.equal(writes, 0, scenario);
   }
 });
 
