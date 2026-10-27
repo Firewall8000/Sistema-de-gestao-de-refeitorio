@@ -395,7 +395,7 @@ class MealValidatorService {
         sub: 'Aluno não foi encontrado ou está inativo no sistema.'
       });
 
-      if (typeof window.showAlertModal === 'function') {
+      if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: 'Aluno não encontrado ou inativo',
           message: 'Aluno não foi encontrado ou está inativo no sistema.',
@@ -429,7 +429,7 @@ class MealValidatorService {
         sub: dupMsg
       });
 
-      if (typeof window.showAlertModal === 'function') {
+      if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: 'Check-in Duplicado',
           message: `Check-in já realizado hoje para este aluno!\n\n${dupMsg}`,
@@ -466,7 +466,7 @@ class MealValidatorService {
               sub: 'Check-in já realizado hoje para este aluno!'
             });
 
-            if (typeof window.showAlertModal === 'function') {
+            if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
               await window.showAlertModal({
                 title: 'Check-in Duplicado',
                 message: 'Check-in já realizado hoje para este aluno!',
@@ -507,7 +507,7 @@ class MealValidatorService {
 
     await this.updateTodayCounterUI();
 
-    if (typeof window.showAlertModal === 'function') {
+    if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
       await window.showAlertModal({
         title: `Entrada Registrada — ${loteLabel}`,
         message: `Entrada registrada com sucesso!\n\n🏅 Colocação na Fila do Almoço: ${pos}º lugar ${pos > 150 ? '(2º Lote)' : '(Prioridade 1–150)'}\nAluno: ${student.name}\nTurma: ${student.grade} - ${student.turma}\nHorário: ${formattedTime}`,
@@ -540,7 +540,7 @@ class MealValidatorService {
         detail: 'Nenhum estudante foi encontrado com os dados apresentados.',
         sub: 'Verifique se o crachá pertence à escola ou solicite segunda via na Secretaria.'
       });
-      if (typeof window.showAlertModal === 'function') {
+      if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: 'Aluno não encontrado',
           message: 'Aluno não foi encontrado com os dados apresentados.',
@@ -557,7 +557,7 @@ class MealValidatorService {
         detail: `${student.name} — ${student.grade} (${student.turma})`,
         sub: 'Este aluno está marcado como inativo no sistema. Procure a secretaria.'
       });
-      if (typeof window.showAlertModal === 'function') {
+      if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: 'Aluno Inativo',
           message: 'Aluno está marcado como inativo no sistema.',
@@ -585,7 +585,7 @@ class MealValidatorService {
         window.audioFeedback.playErrorSound();
       }
 
-      if (typeof window.showAlertModal === 'function') {
+      if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: 'Entrada não registrada na portaria',
           message: `A entrada de ${student.name} não foi registrada na portaria hoje.\n\nO almoço só pode ser liberado após o registro de entrada na portaria.`,
@@ -610,7 +610,7 @@ class MealValidatorService {
           sub: `Ausência registrada às ${mealTime} (${studentPos}º da fila). A fila já avançou.`
         });
 
-        if (typeof window.showAlertModal === 'function') {
+        if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
           await window.showAlertModal({
             title: 'Aluno Marcado como Ausente',
             message: `O aluno ${student.name} (${studentPos}º da fila) foi marcado como ausente no refeitório às ${mealTime}.`,
@@ -627,7 +627,7 @@ class MealValidatorService {
         sub: `Refeição já concedida hoje às ${mealTime} (${studentPos}º da fila). Bloqueado segundo a RN-001.`
       });
 
-      if (typeof window.showAlertModal === 'function') {
+      if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: 'Almoço Já Registrado',
           message: `Este aluno já realizou a refeição hoje!\n\nEle era o ${studentPos}º da fila.`,
@@ -700,7 +700,7 @@ class MealValidatorService {
               sub: 'Este aluno já realizou a refeição hoje!'
             });
 
-            if (typeof window.showAlertModal === 'function') {
+            if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
               await window.showAlertModal({
                 title: 'Almoço Já Registrado',
                 message: 'Este aluno já realizou a refeição hoje!',
@@ -761,7 +761,7 @@ class MealValidatorService {
 
       await this.updateTodayCounterUI();
 
-      if (typeof window.showAlertModal === 'function') {
+      if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
           title: '⚠️ Furou a Fila (' + studentPos + 'º Lugar) — Almoço Liberado',
           message: '⚠️ ALERTA: Este aluno está furando a fila!\n\n🏅 Posição dele na fila: ' + studentPos + 'º lugar ' + (studentPos > 150 ? '(2º Lote)' : '(1º Lote)') + '\n⏳ Vez na ordem de chegada: ' + nextPos + 'º lugar (' + nextStudentName + ')\n\n✅ Almoço LIBERADO normalmente para ' + student.name + ' (' + student.grade + ' - ' + student.turma + ') às ' + formattedTime + '.',
@@ -781,7 +781,7 @@ class MealValidatorService {
 
     await this.updateTodayCounterUI();
 
-    if (typeof window.showAlertModal === 'function') {
+    if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
       await window.showAlertModal({
         title: 'Almoço Liberado',
         message: `Almoço liberado com sucesso!\n\n🏅 Posição na Fila: ${studentPos}º lugar ${studentPos > 150 ? '(2º Lote)' : '(1º Lote)'}\nAluno: ${student.name}\nTurma: ${student.grade} - ${student.turma}\nHorário de Liberação: ${formattedTime}${skippedNotice ? '\n\n⏭️ ' + skippedNotice : ''}`,
@@ -905,15 +905,6 @@ class MealValidatorService {
    * warning: true = aviso (âmbar) sem bloqueio — ex.: almoço liberado, mas aluno furou a fila.
    */
   displayValidationResult({ success, warning = false, title, detail, sub }) {
-    // O resultado completo já é exibido pelo modal do fluxo de leitura.
-    // Mantém o banner apenas como fallback caso o modal não esteja disponível.
-    if (typeof window.showAlertModal === 'function') {
-      const previous = document.getElementById('validation-banner');
-      if (previous) previous.style.display = 'none';
-      if (success && !warning) window.audioFeedback?.playSuccessSound();
-      else window.audioFeedback?.playErrorSound();
-      return;
-    }
     const banner = document.getElementById('validation-banner');
     const icon = document.getElementById('val-icon');
     const titleEl = document.getElementById('val-title');

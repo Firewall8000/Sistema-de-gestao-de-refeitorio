@@ -1,8 +1,9 @@
 # Leitura e sincronização
 
-O resultado de cada leitura aparece em uma única janela. O aviso grande dentro
-da página fica oculto quando a janela está disponível. Enquanto o resultado
-estiver aberto, novas leituras são ignoradas. A ausência confirmada continua
+O resultado de cada leitura aparece somente no aviso grande da própria página:
+verde para entrada ou almoço liberado e amarelo com verde para almoço fora da
+ordem. Não abre uma segunda janela com OK. Durante o processamento de uma leitura,
+novas leituras são ignoradas. A ausência confirmada continua
 exigindo confirmação própria no Admin.
 
 As entradas e os almoços são guardados no IndexedDB do aparelho. O envio pendente

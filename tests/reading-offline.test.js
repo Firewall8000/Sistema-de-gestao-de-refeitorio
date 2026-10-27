@@ -24,7 +24,8 @@ function setup(online = false) {
       upsert: async (row, options) => { uploads.push({ table, row, options }); return { error: null }; }
     }) }
   };
-  const context = { window, navigator: { onLine: online }, document: { getElementById: () => null }, console, setTimeout, clearTimeout };
+  const nodes = Object.fromEntries(['validation-banner', 'val-icon', 'val-title', 'val-detail', 'val-sub'].map(id => [id, { style: {}, textContent: '', scrollIntoView() {} }]));
+  const context = { window, navigator: { onLine: online }, document: { getElementById: id => nodes[id] || null }, console, setTimeout, clearTimeout };
   vm.createContext(context);
   for (const file of ['mealService.js', 'sync.js', 'scanner.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../js', file), 'utf8'), context);
@@ -36,14 +37,15 @@ function setup(online = false) {
   m.getTodayMealForStudent = async () => null;
   m.getTodayOrderedEntries = async () => records.school_entries;
   m._fetchTodayMealsRaw = async () => records.meal_logs;
-  return { window, context, records, alerts, uploads, m };
+  return { window, context, records, alerts, uploads, m, nodes };
 }
 
 test('offline portaria confirms once, saves timestamp and uploads on reconnect', async () => {
   const h = setup();
   assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'token' }), true);
-  assert.equal(h.alerts.length, 1);
-  assert.match(h.alerts[0].title, /Entrada Registrada/);
+  assert.equal(h.alerts.length, 0);
+  assert.match(h.nodes['val-title'].textContent, /ENTRADA REGISTRADA/);
+  assert.equal(h.nodes['validation-banner'].className, 'validation-banner success');
   const entry = h.records.school_entries[0];
   assert.equal(entry.synced, false);
   h.context.navigator.onLine = true;
@@ -56,16 +58,16 @@ test('offline portaria confirms once, saves timestamp and uploads on reconnect',
   assert.equal(h.uploads.length, 1);
 });
 
-test('offline out-of-order meal is stored and produces one warning modal', async () => {
+test('offline out-of-order meal shows the standard warning banner without extra modal', async () => {
   const h = setup();
   h.records.school_entries.push({ student_id: 's1' }, { student_id: 's2' });
   h.m.getScannerMode = () => 'refeitorio';
   await h.m.validateAndRecordMeal({ qrToken: 'token' });
   assert.equal(h.records.meal_logs.length, 1);
   assert.equal(h.records.meal_logs[0].synced, false);
-  assert.equal(h.alerts.length, 1);
-  assert.equal(h.alerts[0].type, 'warning');
-  assert.match(h.alerts[0].title, /Liberado/);
+  assert.equal(h.alerts.length, 0);
+  assert.equal(h.nodes['validation-banner'].className, 'validation-banner warning');
+  assert.match(h.nodes['val-title'].textContent, /ALMOÇO LIBERADO/);
 });
 
 test('internet indicator does not mark failed cloud writes as synchronized', async () => {
@@ -92,10 +94,10 @@ test('failed sync keeps pending data and retries without parallel upload', async
   assert.equal(h.window.syncEngine.syncing, false);
 });
 
-test('another reading is ignored while the result modal is open', async () => {
+test('another reading is ignored while the first reading is being processed', async () => {
   const h = setup();
   let dismiss;
-  h.window.showAlertModal = () => new Promise(resolve => { dismiss = resolve; });
+  h.m.updateTodayCounterUI = () => new Promise(resolve => { dismiss = resolve; });
   const first = h.m.validateAndRecordMeal({ qrToken: 'token' });
   while (!dismiss) await Promise.resolve();
   assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'other' }), false);
