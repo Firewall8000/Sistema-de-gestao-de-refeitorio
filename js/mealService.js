@@ -353,11 +353,21 @@ class MealValidatorService {
    * accepts { qrToken } or { registration }
    */
   async validateAndRecordMeal({ qrToken, registration }) {
-    const mode = this.getScannerMode();
-    if (mode === 'portaria') {
-      return await this.recordPortariaEntry({ qrToken, registration });
-    } else {
-      return await this.recordRefeitorioMeal({ qrToken, registration });
+    if (this._processingReading) return false;
+    this._processingReading = true;
+    try {
+      const mode = this.getScannerMode();
+      if (mode === 'portaria') {
+        return await this.recordPortariaEntry({ qrToken, registration });
+      } else {
+        return await this.recordRefeitorioMeal({ qrToken, registration });
+      }
+    } catch (error) {
+      console.error('Falha ao registrar leitura:', error);
+      await window.showAlertModal?.({ title: 'Leitura não confirmada', message: 'Não foi possível confirmar o registro. Verifique o armazenamento e tente novamente.', type: 'danger' });
+      return false;
+    } finally {
+      this._processingReading = false;
     }
   }
 
@@ -440,10 +450,12 @@ class MealValidatorService {
       entry_method: method
     };
 
+    let entrySynced = false;
     // 3. Tratamento de duplicidade de chave única (código PostgreSQL 23505 ou constraint unique_student_entry_per_day)
     if (window.supabaseClient && navigator.onLine) {
       try {
         const { error } = await window.supabaseClient.from('school_entries').insert(entryRecord);
+        entrySynced = !error;
         if (error) {
           if (error.code === '23505' || (error.message && (error.message.includes('unique_student_entry_per_day') || error.message.toLowerCase().includes('unique')))) {
             console.warn('⚠️ Check-in duplicado no Supabase:', student.registration);
@@ -469,9 +481,7 @@ class MealValidatorService {
       }
     }
 
-    try {
-      await window.dbEngine.put('school_entries', entryRecord);
-    } catch (e) {}
+    await window.dbEngine.put('school_entries', { ...entryRecord, synced: entrySynced });
 
     // 4. Sucesso: Exiba o modal de sucesso informando o nome do aluno, turma e o horário de chegada formatado (HH:mm:ss). Atualize o contador de entradas do dia.
     const formattedTime = this.formatTimeString(nowIso);
@@ -657,7 +667,7 @@ class MealValidatorService {
       date: this.getTodayDateString(),
       timestamp: nowIso,
       qrTokenUsed: student.qrToken,
-      synced: navigator.onLine,
+      synced: false,
       validationMethod: method
     };
 
@@ -678,6 +688,7 @@ class MealValidatorService {
         };
 
         const { error } = await window.supabaseClient.from('meal_logs').insert(row);
+        mealLog.synced = !error;
 
         if (error) {
           if (error.code === '23505' || (error.message && (error.message.includes('unique_student_meal_per_date') || error.message.toLowerCase().includes('unique')))) {
@@ -894,6 +905,15 @@ class MealValidatorService {
    * warning: true = aviso (âmbar) sem bloqueio — ex.: almoço liberado, mas aluno furou a fila.
    */
   displayValidationResult({ success, warning = false, title, detail, sub }) {
+    // O resultado completo já é exibido pelo modal do fluxo de leitura.
+    // Mantém o banner apenas como fallback caso o modal não esteja disponível.
+    if (typeof window.showAlertModal === 'function') {
+      const previous = document.getElementById('validation-banner');
+      if (previous) previous.style.display = 'none';
+      if (success && !warning) window.audioFeedback?.playSuccessSound();
+      else window.audioFeedback?.playErrorSound();
+      return;
+    }
     const banner = document.getElementById('validation-banner');
     const icon = document.getElementById('val-icon');
     const titleEl = document.getElementById('val-title');

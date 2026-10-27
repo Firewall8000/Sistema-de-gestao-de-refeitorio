@@ -22,6 +22,9 @@ class NetworkSyncEngine {
 
     // Initial check
     this.handleNetworkChange(navigator.onLine);
+    this.retryTimer = setInterval(() => {
+      if (navigator.onLine) this.syncPendingOfflineRecords();
+    }, 30000);
   }
 
   registerServiceWorker() {
@@ -79,20 +82,31 @@ class NetworkSyncEngine {
     if (offlineBar) {
       if (online) {
         offlineBar.classList.add('hidden');
-        this.syncPendingOfflineRecords();
       } else {
         offlineBar.classList.remove('hidden');
       }
     }
+    if (online) this.syncPendingOfflineRecords();
   }
 
   /**
    * Syncs locally stored offline meal records to Supabase Cloud when connection returns.
    */
   async syncPendingOfflineRecords() {
-    if (!window.dbEngine) return;
+    if (!window.dbEngine || !window.supabaseClient || !navigator.onLine || this.syncing) return;
+    this.syncing = true;
 
     try {
+      // Portaria primeiro: preserva a data e o horário capturados sem internet.
+      const entries = await window.dbEngine.getAll('school_entries');
+      for (const entry of entries.filter(e => e.synced !== true)) {
+        const { synced, ...row } = entry;
+        const { error } = await window.supabaseClient.from('school_entries').upsert(row, {
+          onConflict: 'student_id,entry_date', ignoreDuplicates: true
+        });
+        if (!error) await window.dbEngine.put('school_entries', { ...entry, synced: true });
+        else console.warn('Entrada ainda pendente de sincronização:', error);
+      }
       const allMeals = await window.dbEngine.getAll('meal_logs');
       const pendingMeals = allMeals.filter(m => !m.synced);
 
@@ -124,10 +138,13 @@ class NetworkSyncEngine {
           }
         }
 
-        console.log('✅ Todos os registros offline foram sincronizados com sucesso.');
+        const remaining = (await window.dbEngine.getAll('meal_logs')).filter(m => !m.synced).length;
+        console.log(`Sincronização de almoços concluída: ${remaining} pendentes.`);
       }
     } catch (err) {
       console.warn('⚠️ Falha durante a sincronização de registros offline:', err);
+    } finally {
+      this.syncing = false;
     }
   }
 }

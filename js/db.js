@@ -84,7 +84,8 @@ class RefectoryDatabase {
     return new Promise((resolve, reject) => {
       const store = this._transaction(storeName, 'readwrite');
       const request = store.put(item);
-      request.onsuccess = () => resolve(item);
+      store.transaction.oncomplete = () => resolve(item);
+      store.transaction.onabort = () => reject(store.transaction.error || new Error('Gravação local cancelada.'));
       request.onerror = (e) => reject(e.target.error);
     });
   }

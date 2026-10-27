@@ -267,22 +267,27 @@ class QrScannerController {
    * Handles decoded QR token string and triggers validation service.
    */
   async handleDecodedToken(token) {
-    if (!token || token === this.lastScannedToken) {
+    if (!token || token === this.lastScannedToken || this.processingToken || window.mealValidatorService?._processingReading) {
       return; // prevent rapid multi-scan of the same code
     }
 
     this.lastScannedToken = token;
+    this.processingToken = true;
     
     // Trigger meal validation service
-    if (window.mealValidatorService) {
-      await window.mealValidatorService.validateAndRecordMeal({ qrToken: token });
-    }
+    try {
+      if (window.mealValidatorService) {
+        await window.mealValidatorService.validateAndRecordMeal({ qrToken: token });
+      }
 
-    // Cooldown reset after 3 seconds
-    clearTimeout(this.cooldownTimer);
-    this.cooldownTimer = setTimeout(() => {
-      this.lastScannedToken = null;
-    }, 3000);
+    } finally {
+      this.processingToken = false;
+      // Cooldown reset after 3 seconds
+      clearTimeout(this.cooldownTimer);
+      this.cooldownTimer = setTimeout(() => {
+        this.lastScannedToken = null;
+      }, 3000);
+    }
   }
 }
 
