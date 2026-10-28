@@ -5,6 +5,13 @@
 
 class StudentService {
 
+  _readingQuery(query) {
+    return window.mealValidatorService
+      ? window.mealValidatorService.readingQuery(query)
+      : query;
+  }
+
+
   // A chegada é histórica; o nome exibido vem do cadastro atual.
   getDisplayName(entry, student) {
     return student?.name || entry?.student_name || entry?.studentName || 'Aluno';
@@ -110,14 +117,18 @@ class StudentService {
     const reg = registration.trim();
     if (window.supabaseClient && navigator.onLine) {
       try {
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await this._readingQuery(window.supabaseClient
           .from('students')
           .select('*')
           .eq('registration', reg)
-          .maybeSingle();
+          .maybeSingle());
 
-        if (!error && data) {
-          return this._mapFromSupabase(data);
+        if (!error) {
+          const student = this._mapFromSupabase(data);
+          if (student) {
+            try { await window.dbEngine.put('students', student); } catch (e) {}
+          }
+          return student;
         }
       } catch (e) {}
     }
@@ -131,14 +142,18 @@ class StudentService {
     const token = qrToken.trim();
     if (window.supabaseClient && navigator.onLine) {
       try {
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await this._readingQuery(window.supabaseClient
           .from('students')
           .select('*')
           .eq('qr_token', token)
-          .maybeSingle();
+          .maybeSingle());
 
-        if (!error && data) {
-          return this._mapFromSupabase(data);
+        if (!error) {
+          const student = this._mapFromSupabase(data);
+          if (student) {
+            try { await window.dbEngine.put('students', student); } catch (e) {}
+          }
+          return student;
         }
       } catch (e) {}
     }

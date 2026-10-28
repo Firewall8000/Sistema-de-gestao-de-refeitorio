@@ -5,6 +5,143 @@
 
 class MealValidatorService {
 
+  // One network budget for the entire reading, not a timeout per request.
+  async readingQuery(query) {
+    if (!this._readingDeadline) return await query;
+    if (Date.now() < (this._networkRetryAt || 0)) {
+      this._usingLocal = true;
+      throw new Error('Rede em recuperação: usando os dados locais');
+    }
+    const remaining = this._readingDeadline - Date.now();
+    if (remaining <= 0) {
+      this._usingLocal = true;
+      throw new Error('Tempo de rede da leitura esgotado');
+    }
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    let timer;
+    try {
+      return await Promise.race([
+        controller && query.abortSignal ? query.abortSignal(controller.signal) : query,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            this._networkRetryAt = Date.now() + 15000;
+            this._usingLocal = true;
+            controller?.abort();
+            reject(new Error('Rede lenta: usando os dados locais'));
+          }, remaining);
+        })
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  refreshAfterReading() {
+    // Coalesce bursts; a slow dashboard must never hold the scanner lock.
+    if (this._refreshPending) return;
+    this._refreshPending = true;
+    setTimeout(async () => {
+      try { await this.updateTodayCounterUI(); }
+      catch (error) { console.warn('Falha ao atualizar painel:', error); }
+      finally { this._refreshPending = false; }
+    }, 0);
+  }
+
+  // One HTTP request validates AND records. Only a missing RPC uses the legacy
+  // online path; permission/business failures must never become local approval.
+  async tryRemoteScan({ qrToken, registration }, mode) {
+    const client = window.supabaseClient;
+    if (!navigator.onLine || !client?.rpc || this._rpcUnavailable) return null;
+    let response;
+    try {
+      response = await this.readingQuery(client.rpc('register_scan_rpc', {
+        p_identifier: (qrToken || registration || '').trim(),
+        p_method: qrToken ? 'qr_code' : 'manual',
+        p_mode: mode,
+        p_request_id: this._readingId
+      }));
+    } catch (error) {
+      // A lost reply may have committed remotely. Keep the same ID for fallback.
+      this._readingDeadline = Date.now() - 1;
+      this._usingLocal = true;
+      return null;
+    }
+    const { data, error, status } = response || {};
+    if (error?.code === 'PGRST202') {
+      this._rpcUnavailable = true;
+      return null;
+    }
+    if (error && status === 0) {
+      this._readingDeadline = Date.now() - 1;
+      this._usingLocal = true;
+      return null;
+    }
+    const titles = {
+      NOT_FOUND: 'ALUNO NÃO ENCONTRADO OU INATIVO',
+      INACTIVE: 'ALUNO INATIVO / BLOQUEADO',
+      NO_GATE_ENTRY: 'ENTRADA NÃO REGISTRADA NA PORTARIA',
+      ABSENT: 'ALUNO MARCADO COMO AUSENTE!',
+      ALREADY_GRANTED: mode === 'portaria' ? 'CHECK-IN JÁ REALIZADO HOJE!' : 'ALMOÇO JÁ REGISTRADO HOJE!',
+      INVALID_INPUT: 'CÓDIGO / MATRÍCULA INVÁLIDA'
+    };
+    const granted = !error && data?.status === 'GRANTED';
+    if (error || !data || (!granted && !titles[data.status]) ||
+        (granted && (!data.student?.id || !data.record?.id || !data.entry?.id))) {
+      this.displayValidationResult({ success: false, title: 'LEITURA NÃO CONFIRMADA',
+        detail: 'O Supabase não confirmou o registro.',
+        sub: 'Verifique a conexão e as permissões antes de tentar novamente.' });
+      return { result: false };
+    }
+
+    // The server has already committed. Cache failures must not announce a
+    // failed remote registration or trigger a second write via the old flow.
+    let cacheFailed = false;
+    try {
+      if (data.student?.id) {
+        const s = data.student;
+        const cached = await window.dbEngine.get('students', s.id);
+        await window.dbEngine.put('students', { ...cached,
+          id: s.id, name: s.name, registration: s.registration, grade: s.grade,
+          turma: s.turma, active: s.active, qrToken: s.qr_token });
+      }
+    } catch (error) {
+      cacheFailed = true;
+    }
+    // A conflicting cached entry/student must not prevent caching today's meal.
+    const records = [];
+    if (data.entry?.id) records.push(['school_entries', { ...data.entry, synced: true }]);
+    if (mode === 'refeitorio' && data.record?.id) {
+      records.push(['meal_logs', { ...this._mapFromSupabase(data.record), synced: true }]);
+    }
+    for (const [table, record] of records) {
+      try { await window.dbEngine.put(table, record); }
+      catch (error) { cacheFailed = true; }
+    }
+    if (cacheFailed) console.warn('Resposta do Supabase confirmada; cache local incompleto.');
+    const s = data.student;
+    const position = data.position ? `${data.position}º da fila` : '';
+    const cutting = granted && mode === 'refeitorio' && data.cutting_line === true;
+    const title = granted
+      ? (mode === 'portaria' ? 'ENTRADA REGISTRADA ✓' : 'ALMOÇO LIBERADO ✓') +
+        (position ? ` — ${position.toUpperCase()}` : '')
+      : titles[data.status];
+    let sub = granted ? 'Registro confirmado no Supabase.' : 'Registro não autorizado para esta leitura.';
+    if (data.status === 'NO_GATE_ENTRY') sub = 'Registre a entrada na portaria antes do almoço.';
+    const timestamp = mode === 'portaria' ? data.record?.entry_time : data.record?.timestamp;
+    if (timestamp) sub += ` Horário: ${this.formatTimeString(timestamp)}.`;
+    if (cutting) sub += ` Atenção: passou à frente do ${data.next_position}º da fila.`;
+    if (cacheFailed) sub += ' Não foi possível atualizar a cópia deste aparelho.';
+    this.displayValidationResult({ success: granted, warning: cutting, title,
+      detail: s ? `${s.name} — ${s.grade} (${s.turma})` : 'Confira o código apresentado.', sub });
+    this.refreshAfterReading();
+    if (!document.getElementById('validation-banner')) {
+      await window.showAlertModal?.({ title, message: sub, type: granted ? 'success' : 'warning' });
+    }
+    return { result: cutting
+      ? { success: true, cuttingLine: true, position: data.position, expectedPosition: data.next_position }
+      : granted };
+  }
+
   /**
    * Gets active scanner mode ('refeitorio' | 'portaria'). Default is 'refeitorio'.
    */
@@ -106,12 +243,12 @@ class MealValidatorService {
 
     if (window.supabaseClient && navigator.onLine) {
       try {
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await this.readingQuery(window.supabaseClient
           .from('meal_logs')
           .select('*')
           .eq('date', today)
           .eq('student_registration', studentRegistration)
-          .maybeSingle();
+          .maybeSingle());
 
         if (!error && data) {
           return this._mapFromSupabase(data);
@@ -147,12 +284,12 @@ class MealValidatorService {
 
     if (window.supabaseClient && navigator.onLine) {
       try {
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await this.readingQuery(window.supabaseClient
           .from('school_entries')
           .select('*')
           .eq('entry_date', today)
           .eq('student_id', studentId)
-          .maybeSingle();
+          .maybeSingle());
 
         if (!error && data) {
           return data;
@@ -176,10 +313,10 @@ class MealValidatorService {
 
     if (window.supabaseClient && navigator.onLine) {
       try {
-        const { count, error } = await window.supabaseClient
+        const { count, error } = await this.readingQuery(window.supabaseClient
           .from('school_entries')
           .select('*', { count: 'exact', head: true })
-          .eq('entry_date', today);
+          .eq('entry_date', today));
 
         if (!error && count !== null) {
           return count;
@@ -206,11 +343,11 @@ class MealValidatorService {
 
     if (window.supabaseClient && navigator.onLine) {
       try {
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await this.readingQuery(window.supabaseClient
           .from('school_entries')
           .select('*')
           .eq('entry_date', today)
-          .order('entry_time', { ascending: true });
+          .order('entry_time', { ascending: true }));
 
         if (!error && Array.isArray(data)) entries = data.slice();
       } catch (e) {}
@@ -251,10 +388,10 @@ class MealValidatorService {
 
     if (window.supabaseClient && navigator.onLine) {
       try {
-        const { data, error } = await window.supabaseClient
+        const { data, error } = await this.readingQuery(window.supabaseClient
           .from('meal_logs')
           .select('*')
-          .eq('date', today);
+          .eq('date', today));
 
         if (!error && Array.isArray(data)) meals = data.slice();
       } catch (e) {}
@@ -355,8 +492,14 @@ class MealValidatorService {
   async validateAndRecordMeal({ qrToken, registration }) {
     if (this._processingReading) return false;
     this._processingReading = true;
+    this._readingDeadline = Date.now() + 1800;
+    this._usingLocal = !navigator.onLine;
+    this._readingId = 'scan-' + (globalThis.crypto?.randomUUID?.() ||
+      `${Date.now()}-${Math.random().toString(36).slice(2)}`);
     try {
       const mode = this.getScannerMode();
+      const remote = await this.tryRemoteScan({ qrToken, registration }, mode);
+      if (remote !== null) return remote.result;
       if (mode === 'portaria') {
         return await this.recordPortariaEntry({ qrToken, registration });
       } else {
@@ -368,6 +511,8 @@ class MealValidatorService {
       return false;
     } finally {
       this._processingReading = false;
+      this._readingDeadline = null;
+      this._readingId = null;
     }
   }
 
@@ -441,7 +586,7 @@ class MealValidatorService {
 
     // 2. Insira o registro na tabela public.school_entries
     const entryRecord = {
-      id: 'entry-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      id: this._readingId || 'entry-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       student_id: student.id,
       student_name: student.name,
       turma: student.turma,
@@ -454,7 +599,7 @@ class MealValidatorService {
     // 3. Tratamento de duplicidade de chave única (código PostgreSQL 23505 ou constraint unique_student_entry_per_day)
     if (window.supabaseClient && navigator.onLine) {
       try {
-        const { error } = await window.supabaseClient.from('school_entries').insert(entryRecord);
+        const { error } = await this.readingQuery(window.supabaseClient.from('school_entries').insert(entryRecord));
         entrySynced = !error;
         if (error) {
           if (error.code === '23505' || (error.message && (error.message.includes('unique_student_entry_per_day') || error.message.toLowerCase().includes('unique')))) {
@@ -505,7 +650,7 @@ class MealValidatorService {
       sub: `Colocação para o almoço: ${pos}º lugar • Chegada às ${formattedTime}`
     });
 
-    await this.updateTodayCounterUI();
+    this.refreshAfterReading();
 
     if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
       await window.showAlertModal({
@@ -644,7 +789,7 @@ class MealValidatorService {
     const rawMeals = await this._fetchTodayMealsRaw();
     const lockStudentMap = new Map([[student.id, student]]);
     try {
-      const allStudents = await window.studentService.getAllStudents();
+      const allStudents = await window.dbEngine.getAll('students');
       (allStudents || []).forEach(s => { if (!lockStudentMap.has(s.id)) lockStudentMap.set(s.id, s); });
     } catch (e) {}
     const queue = this._computeQueueState(orderedEntries, rawMeals, lockStudentMap);
@@ -658,7 +803,7 @@ class MealValidatorService {
 
     const nowIso = new Date().toISOString();
     const mealLog = {
-      id: 'meal-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      id: this._readingId || 'meal-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       studentId: student.id,
       studentRegistration: student.registration,
       studentName: student.name,
@@ -687,7 +832,7 @@ class MealValidatorService {
           validation_method: mealLog.validationMethod
         };
 
-        const { error } = await window.supabaseClient.from('meal_logs').insert(row);
+        const { error } = await this.readingQuery(window.supabaseClient.from('meal_logs').insert(row));
         mealLog.synced = !error;
 
         if (error) {
@@ -759,7 +904,7 @@ class MealValidatorService {
         sub: `Passou à frente do ${nextPos}º da fila (${nextStudentName}) • Almoço liberado às ${formattedTime}`
       });
 
-      await this.updateTodayCounterUI();
+      this.refreshAfterReading();
 
       if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
         await window.showAlertModal({
@@ -779,7 +924,7 @@ class MealValidatorService {
       sub: `${studentPos}º da fila • Matrícula: ${student.registration} • Liberado às ${formattedTime} (${method})${skippedNotice ? ' • ' + skippedNotice : ''}`
     });
 
-    await this.updateTodayCounterUI();
+    this.refreshAfterReading();
 
     if (!document.getElementById('validation-banner') && typeof window.showAlertModal === 'function') {
       await window.showAlertModal({
@@ -905,6 +1050,9 @@ class MealValidatorService {
    * warning: true = aviso (âmbar) sem bloqueio — ex.: almoço liberado, mas aluno furou a fila.
    */
   displayValidationResult({ success, warning = false, title, detail, sub }) {
+    if (this._usingLocal && this._processingReading) {
+      sub += ' • Dados locais: sincronização pendente; fila pode estar incompleta.';
+    }
     const banner = document.getElementById('validation-banner');
     const icon = document.getElementById('val-icon');
     const titleEl = document.getElementById('val-title');

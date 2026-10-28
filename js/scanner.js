@@ -44,10 +44,13 @@ class QrScannerController {
       }
 
       if (typeof Html5Qrcode !== 'undefined') {
-        this.html5Qrcode = new Html5Qrcode('html5qr-reader');
+        this.html5Qrcode = new Html5Qrcode('html5qr-reader', {
+          formatsToSupport: typeof Html5QrcodeSupportedFormats !== 'undefined'
+            ? [Html5QrcodeSupportedFormats.QR_CODE] : undefined
+        });
 
         const qrConfig = {
-          fps: 12,
+          fps: 8,
           qrbox: (viewfinderWidth, viewfinderHeight) => {
             const minDim = Math.min(viewfinderWidth, viewfinderHeight);
             const boxSize = Math.floor(minDim * 0.85);
@@ -94,7 +97,10 @@ class QrScannerController {
    * Fallback camera loop using jsQR decoder engine.
    */
   async _startJsQrCameraFallback(container) {
-    const constraints = { video: { facingMode: { ideal: 'environment' } } };
+    const constraints = { video: {
+      facingMode: { ideal: 'environment' },
+      width: { ideal: 640 }, height: { ideal: 480 }
+    } };
     this.videoStream = await navigator.mediaDevices.getUserMedia(constraints);
     
     let video = document.getElementById('qr-video');
@@ -107,6 +113,9 @@ class QrScannerController {
       if (container) container.appendChild(video);
     }
     video.srcObject = this.videoStream;
+    video.style.display = 'block';
+    video.setAttribute('playsinline', '');
+    video.muted = true;
     await video.play();
     this.isScanning = true;
 
@@ -114,10 +123,11 @@ class QrScannerController {
     const ctx = canvas.getContext('2d');
 
     this.jsQrInterval = setInterval(() => {
-      if (!this.isScanning || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+      if (!this.isScanning || this.processingToken || window.mealValidatorService?._processingReading || video.readyState !== video.HAVE_ENOUGH_DATA) return;
 
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      const scale = Math.min(1, 640 / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -273,6 +283,22 @@ class QrScannerController {
 
     this.lastScannedToken = token;
     this.processingToken = true;
+    // Give the UI/IndexedDB time to run instead of decoding the same QR again.
+    try { if (this.isScanning) this.html5Qrcode?.pause(); } catch (e) {}
+    const banner = document.getElementById('validation-banner');
+    if (banner) {
+      banner.style.display = 'flex';
+      banner.className = 'validation-banner';
+      banner.style.background = '';
+      banner.style.border = '';
+      banner.style.boxShadow = '';
+      const texts = { 'val-icon': '…', 'val-title': 'QR IDENTIFICADO — CONSULTANDO ALUNO',
+        'val-detail': 'Aguarde a confirmação do registro.', 'val-sub': '' };
+      for (const [id, text] of Object.entries(texts)) {
+        const node = document.getElementById(id);
+        if (node) { node.textContent = text; node.style.color = ''; node.style.background = ''; }
+      }
+    }
     
     // Trigger meal validation service
     try {
@@ -282,6 +308,7 @@ class QrScannerController {
 
     } finally {
       this.processingToken = false;
+      try { if (this.isScanning) this.html5Qrcode?.resume(); } catch (e) {}
       // Cooldown reset after 3 seconds
       clearTimeout(this.cooldownTimer);
       this.cooldownTimer = setTimeout(() => {

@@ -97,7 +97,11 @@ test('failed sync keeps pending data and retries without parallel upload', async
 test('another reading is ignored while the first reading is being processed', async () => {
   const h = setup();
   let dismiss;
-  h.m.updateTodayCounterUI = () => new Promise(resolve => { dismiss = resolve; });
+  const put = h.window.dbEngine.put;
+  h.window.dbEngine.put = async (...args) => {
+    await new Promise(resolve => { dismiss = resolve; });
+    return put(...args);
+  };
   const first = h.m.validateAndRecordMeal({ qrToken: 'token' });
   while (!dismiss) await Promise.resolve();
   assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'other' }), false);
@@ -105,4 +109,86 @@ test('another reading is ignored while the first reading is being processed', as
   await first;
   assert.equal(h.records.school_entries.length, 1);
   assert.equal(h.m._processingReading, false);
+});
+
+
+test('slow network falls back within one shared budget and skips network on the next reading', async () => {
+  const h = setup(true);
+  let started = 0, aborted = false;
+  h.context.AbortController = AbortController;
+  h.window.dbEngine.getByIndex = async () => ({ id: 's2', registration: 'R2', name: 'Aluno', active: true });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/studentService.js'), 'utf8'), h.context);
+  h.window.supabaseClient.from = () => {
+    const q = {
+      select() { return q; }, eq() { return q; }, maybeSingle() { return q; }, insert() { return q; },
+      abortSignal(signal) { signal.addEventListener('abort', () => { aborted = true; }); return q; },
+      then() { started++; return new Promise(() => {}); }
+    };
+    return q;
+  };
+  const start = Date.now();
+  assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'token' }), true);
+  assert.ok(Date.now() - start < 2600, 'network must not block indefinitely');
+  assert.equal(aborted, true);
+  assert.equal(h.records.school_entries[0].synced, false);
+  assert.match(h.nodes['val-sub'].textContent, /Dados locais/);
+  assert.equal(started, 1, 'later requests must not receive a new timeout budget');
+  await h.m.validateAndRecordMeal({ qrToken: 'other' });
+  assert.equal(started, 1, 'cooldown avoids paying for the same network outage on every student');
+});
+
+test('slow dashboard does not retain the reading lock', async () => {
+  const h = setup();
+  h.m.updateTodayCounterUI = () => new Promise(() => {});
+  assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'token' }), true);
+  assert.equal(h.m._processingReading, false);
+});
+
+test('failed durable storage never shows a successful entry', async () => {
+  const h = setup();
+  h.window.dbEngine.put = async () => { throw new Error('quota'); };
+  assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'token' }), false);
+  assert.equal(h.records.school_entries.length, 0);
+  assert.notEqual(h.nodes['validation-banner'].className, 'validation-banner success');
+});
+
+test('authoritative missing or inactive students cannot use an old active cache', async () => {
+  const h = setup(true);
+  h.window.dbEngine.getByIndex = async () => ({ id: 'old', active: true });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../js/studentService.js'), 'utf8'), h.context);
+  let data = null;
+  h.window.supabaseClient.from = () => {
+    const q = { select() { return q; }, eq() { return q; }, maybeSingle: async () => ({ data, error: null }) };
+    return q;
+  };
+  assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'old' }), false);
+  data = { id: 'old', active: false };
+  assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'old' }), false);
+  assert.equal(h.records.school_entries.length, 0);
+});
+
+
+test('local duplicate checks still prevent a second entry and a second meal', async () => {
+  const h = setup();
+  delete h.m.getTodayEntryForStudent;
+  delete h.m.getTodayMealForStudent;
+  assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'token' }), true);
+  assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'token' }), false);
+  assert.equal(h.records.school_entries.length, 1);
+  h.m.getScannerMode = () => 'refeitorio';
+  assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'token' }), true);
+  assert.equal(await h.m.validateAndRecordMeal({ qrToken: 'token' }), false);
+  assert.equal(h.records.meal_logs.length, 1);
+});
+
+test('camera decoder pauses during validation and resumes after the durable result', async () => {
+  const h = setup();
+  const scanner = h.window.qrScannerController;
+  const calls = [];
+  scanner.isScanning = true;
+  scanner.html5Qrcode = { pause() { calls.push('pause'); }, resume() { calls.push('resume'); } };
+  await scanner.handleDecodedToken('token');
+  assert.deepEqual(calls, ['pause', 'resume']);
+  assert.equal(h.records.school_entries.length, 1);
+  clearTimeout(scanner.cooldownTimer);
 });
