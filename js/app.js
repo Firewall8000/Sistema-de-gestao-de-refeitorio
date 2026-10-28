@@ -23,6 +23,44 @@ function _esc(v) {
 }
 window._esc = _esc;
 
+let positionLookupRevision = 0;
+async function handlePositionLookup(event) {
+  event.preventDefault();
+  const input = document.getElementById('input-position-registration');
+  const button = document.getElementById('btn-position-lookup');
+  const result = document.getElementById('position-lookup-result');
+  const form = document.getElementById('form-position-lookup');
+  if (!input || !button || !result || button.disabled) return;
+  const registration = input.value.trim();
+  if (!registration) { result.textContent = 'Digite a matrícula do aluno.'; input.focus(); return; }
+  const revision = ++positionLookupRevision;
+  button.disabled = true;
+  button.textContent = 'Consultando…';
+  form?.setAttribute('aria-busy', 'true');
+  result.textContent = 'Consultando posição…';
+  try {
+    const { student, position, localOnly } = await window.mealValidatorService.getQueuePosition(registration);
+    if (revision !== positionLookupRevision || input.value.trim() !== registration) return;
+    const note = localOnly ? '\nDados deste aparelho: a posição pode estar incompleta ou desatualizada.' : '';
+    if (!student) {
+      result.textContent = (localOnly ? 'Aluno não encontrado nos dados deste aparelho.' : 'Aluno não encontrado ou cadastro indisponível.') + note;
+    } else {
+      const name = `${student.name} — ${student.grade} (${student.turma})`;
+      result.textContent = name + '\n' + (position
+        ? `${position}º lugar na ordem de chegada de hoje • ${position <= 150 ? '1º lote' : '2º lote'}\nEssa colocação não muda após o almoço.`
+        : localOnly ? 'Nenhuma entrada de hoje disponível neste aparelho.' : 'Sem entrada registrada na portaria hoje.') + note;
+    }
+  } catch (error) {
+    if (revision === positionLookupRevision && input.value.trim() === registration) {
+      result.textContent = 'Não foi possível consultar a posição. Tente novamente.';
+    }
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Consultar';
+    form?.setAttribute('aria-busy', 'false');
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('🚀 Inicializando Sistema Santos Dumont...');
 
@@ -169,6 +207,16 @@ document.addEventListener('DOMContentLoaded', async () => {
         await window.mealValidatorService.validateAndRecordMeal({ registration: input.value.trim() });
         input.value = '';
       }
+    });
+  }
+
+  const formPositionLookup = document.getElementById('form-position-lookup');
+  if (formPositionLookup) {
+    formPositionLookup.addEventListener('submit', handlePositionLookup);
+    document.getElementById('input-position-registration')?.addEventListener('input', () => {
+      const result = document.getElementById('position-lookup-result');
+      if (result) result.textContent = '';
+      positionLookupRevision++;
     });
   }
 

@@ -5,6 +5,64 @@
 
 class MealValidatorService {
 
+  // Read-only consultation, independent of the scanner's processing lock and
+  // network budget. Never call register_scan_rpc for a position lookup.
+  async getQueuePosition(registration) {
+    const reg = String(registration || '').trim();
+    if (!reg) throw new Error('Digite a matrícula do aluno.');
+    const today = this.getTodayDateString();
+    let student, entries;
+    let localOnly = true;
+    if (navigator.onLine && window.supabaseClient) {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      let timer;
+      try {
+        const queries = [
+          window.supabaseClient.from('students').select('id,name,registration,grade,turma,active')
+            .eq('registration', reg).maybeSingle(),
+          window.supabaseClient.from('school_entries').select('id,student_id,entry_time')
+            .eq('entry_date', today).order('entry_time', { ascending: true })
+        ].map(query => controller && query.abortSignal ? query.abortSignal(controller.signal) : query);
+        const results = await Promise.race([
+          Promise.all(queries),
+          new Promise((_, reject) => { timer = setTimeout(() => {
+            controller?.abort();
+            reject(new Error('Consulta de posição: rede lenta.'));
+          }, 1800); })
+        ]);
+        if (results.some(r => r.error) || !Array.isArray(results[1].data)) {
+          throw new Error('Consulta de posição indisponível.');
+        }
+        student = results[0].data;
+        entries = results[1].data;
+        localOnly = false;
+      } catch (error) {
+        // A local snapshot is explicitly identified as provisional in the UI.
+      } finally { clearTimeout(timer); }
+    }
+    if (localOnly) {
+      [student, entries] = await Promise.all([
+        window.dbEngine.getByIndex('students', 'registration', reg),
+        window.dbEngine.getAllByIndex('school_entries', 'entry_date', today)
+      ]);
+    }
+    if (today !== this.getTodayDateString()) throw new Error('O dia mudou. Consulte novamente.');
+    const seen = new Set();
+    const ordered = entries.slice().sort((a, b) => {
+      const delta = new Date(a.entry_time || a.entryTime) - new Date(b.entry_time || b.entryTime);
+      if (delta) return delta;
+      const aId = String(a.id || ''), bId = String(b.id || '');
+      return aId < bId ? -1 : aId > bId ? 1 : 0;
+    }).filter(e => {
+      const id = e.student_id || e.studentId;
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+    const index = student ? ordered.findIndex(e => (e.student_id || e.studentId) === student.id) : -1;
+    return { student, position: index < 0 ? null : index + 1, localOnly };
+  }
+
   // One network budget for the entire reading, not a timeout per request.
   async readingQuery(query) {
     if (!this._readingDeadline) return await query;
