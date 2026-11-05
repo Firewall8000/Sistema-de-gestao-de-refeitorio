@@ -5,7 +5,7 @@
 
 const CACHE_PREFIX = 'cesd-refectory-';
 // 1. Mudamos a versão para v3.5.0 para forçar o navegador a atualizar os ativos com o Sentry
-const CACHE_NAME = `${CACHE_PREFIX}v3.5.9`;
+const CACHE_NAME = `${CACHE_PREFIX}v3.6.0`;
 
 const ASSETS_TO_CACHE = [
   './',
@@ -32,7 +32,8 @@ const ASSETS_TO_CACHE = [
   './js/scanner.js',
   './js/dashboard.js',
   './js/queuePrint.js',
-  './js/sync.js'
+  './js/sync.js',
+  './js/syncControls.js'
 ];
 
 // 1. Install Event - Ativa imediatamente sem esperar fechar abas

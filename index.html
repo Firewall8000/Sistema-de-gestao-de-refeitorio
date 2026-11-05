@@ -120,6 +120,13 @@
           </div>
         </div>
 
+        <div class="sync-device-panel">
+          <button type="button" id="btn-sync-check" class="btn btn-secondary" aria-describedby="sync-device-status">Sincronizar e Conferir</button>
+          <div id="sync-device-status" role="status" aria-live="polite">Verificando os registros deste aparelho…</div>
+          <p>Com internet, o botão envia e confere os registros e também atualiza os dados para uso offline neste aparelho.</p>
+          <details id="sync-device-issues" hidden><summary>Registros que precisam de atenção</summary><ul id="sync-device-issue-list"></ul></details>
+        </div>
+
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem;">
           
           <!-- Scanner Camera Area -->
@@ -586,6 +593,7 @@
   <script src="js/scanner.js"></script>
   <script src="js/mealService.js"></script>
   <script src="js/sync.js"></script>
+  <script src="js/syncControls.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/queuePrint.js"></script>
   <script src="js/app.js"></script>

@@ -46,6 +46,16 @@
 .corner-br { bottom: -2px; right: -2px; border-width: 0 4px 4px 0; border-bottom-right-radius: 12px; }
 
 /* Mode Selector Pill Toggle Buttons */
+.sync-device-panel { margin-bottom: 1.25rem; padding: 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-md); }
+.sync-device-panel p { margin-top: .5rem; font-size: .8rem; color: var(--text-muted); }
+#sync-device-status { margin-top: .75rem; white-space: pre-line; overflow-wrap: anywhere; }
+#btn-sync-check { max-width: 100%; white-space: normal; }
+#btn-sync-check.sync-attention { border: 2px solid #fbbf24; background: #713f12; color: #fff; box-shadow: 0 0 16px rgba(251,191,36,.55); }
+#btn-sync-check:disabled.sync-attention { opacity: .85; }
+#sync-device-issues { margin-top: .75rem; }
+#sync-device-issue-list { padding-left: 1.25rem; overflow-wrap: anywhere; }
+
+/* Mode Selector Pill Toggle Buttons */
 .mode-selector-pills {
   display: inline-flex;
   background: rgba(15, 23, 42, 0.85);

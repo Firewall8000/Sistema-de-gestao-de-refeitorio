@@ -571,6 +571,7 @@ class MealValidatorService {
       this._processingReading = false;
       this._readingDeadline = null;
       this._readingId = null;
+      window.syncControls?.refreshStatus();
     }
   }
 

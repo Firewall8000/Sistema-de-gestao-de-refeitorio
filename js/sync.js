@@ -92,7 +92,8 @@ class NetworkSyncEngine {
   /**
    * Syncs locally stored offline meal records to Supabase Cloud when connection returns.
    */
-  async syncPendingOfflineRecords() {
+  async syncPendingOfflineRecords({ manual = false } = {}) {
+    if (window.syncControls?.busy && !manual) return;
     if (!window.dbEngine || !window.supabaseClient || !navigator.onLine || this.syncing) return;
     this.syncing = true;
 
@@ -100,10 +101,11 @@ class NetworkSyncEngine {
       // Portaria primeiro: preserva a data e o horário capturados sem internet.
       const entries = await window.dbEngine.getAll('school_entries');
       for (const entry of entries.filter(e => e.synced !== true)) {
-        const { synced, ...row } = entry;
-        const { error } = await window.supabaseClient.from('school_entries').upsert(row, {
+        const row = { id: entry.id, student_id: entry.student_id, student_name: entry.student_name,
+          turma: entry.turma, entry_date: entry.entry_date, entry_time: entry.entry_time, entry_method: entry.entry_method };
+        const { error } = await this.withTimeout(window.supabaseClient.from('school_entries').upsert(row, {
           onConflict: 'student_id,entry_date', ignoreDuplicates: true
-        });
+        }));
         if (!error) await window.dbEngine.put('school_entries', { ...entry, synced: true });
         else console.warn('Entrada ainda pendente de sincronização:', error);
       }
@@ -128,10 +130,10 @@ class NetworkSyncEngine {
             validation_method: meal.validationMethod
           };
 
-          const { error } = await window.supabaseClient.from('meal_logs').upsert(row, {
-            onConflict: 'date,student_registration',
+          const { error } = await this.withTimeout(window.supabaseClient.from('meal_logs').upsert(row, {
+            onConflict: 'student_id,date',
             ignoreDuplicates: true
-          });
+          }));
           if (!error) {
             meal.synced = true;
             await window.dbEngine.put('meal_logs', meal);
@@ -145,7 +147,21 @@ class NetworkSyncEngine {
       console.warn('⚠️ Falha durante a sincronização de registros offline:', err);
     } finally {
       this.syncing = false;
+      window.syncControls?.refreshStatus();
     }
+  }
+
+  async withTimeout(query, ms = 8000) {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    let timer;
+    try {
+      return await Promise.race([
+        controller && query.abortSignal ? query.abortSignal(controller.signal) : query,
+        new Promise((_, reject) => { timer = setTimeout(() => {
+          controller?.abort(); reject(new Error('Sem resposta do servidor. Tente novamente.'));
+        }, ms); })
+      ]);
+    } finally { clearTimeout(timer); }
   }
 }
 

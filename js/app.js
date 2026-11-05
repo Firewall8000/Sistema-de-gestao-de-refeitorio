@@ -76,6 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (window.syncEngine) {
     window.syncEngine.init();
   }
+  window.syncControls?.init();
 
   // 3. Apply Initial Role Permissions (Always start at restricted profile: Leitura / Refeitório)
   if (window.authManager) {

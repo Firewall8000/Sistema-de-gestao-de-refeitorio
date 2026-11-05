@@ -4,7 +4,7 @@
    ========================================================================== */
 
 const DB_NAME = 'SantosDumontRefectoryDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 class RefectoryDatabase {
   constructor() {
@@ -20,6 +20,9 @@ class RefectoryDatabase {
 
       request.onupgradeneeded = (event) => {
         const db = event.target.result;
+        if (!db.objectStoreNames.contains('offline_meta')) {
+          db.createObjectStore('offline_meta', { keyPath: 'id' });
+        }
 
         // Store 1: Students
         if (!db.objectStoreNames.contains('students')) {
@@ -55,6 +58,7 @@ class RefectoryDatabase {
 
       request.onsuccess = (event) => {
         this.db = event.target.result;
+        this.db.onversionchange = () => this.db.close();
         console.log('✅ IndexedDB SantosDumontDB inicializado com sucesso.');
         resolve(this.db);
       };
@@ -63,6 +67,7 @@ class RefectoryDatabase {
         console.error('❌ Erro ao abrir IndexedDB:', event.target.error);
         reject(event.target.error);
       };
+      request.onblocked = () => reject(new Error('Feche as outras abas do sistema e reabra para atualizar o armazenamento.'));
     });
   }
 
@@ -137,6 +142,34 @@ class RefectoryDatabase {
       const request = index.getAll(value);
       request.onsuccess = () => resolve(request.result || []);
       request.onerror = (e) => reject(e.target.error);
+    });
+  }
+
+  // All-or-nothing preparation. Preserve pending/conflicting records, including
+  // readings committed while the download was running, and keep previous days.
+  async saveOfflineSnapshot({ date, students, entries, meals, preparedAt }) {
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(['students', 'school_entries', 'meal_logs', 'offline_meta'], 'readwrite');
+      tx.oncomplete = () => resolve();
+      tx.onabort = () => reject(tx.error || new Error('Preparação offline cancelada.'));
+      const studentStore = tx.objectStore('students');
+      studentStore.clear();
+      students.forEach(s => studentStore.put(s));
+      const merge = (table, incoming, dateKey, studentKey) => {
+        const store = tx.objectStore(table);
+        const request = store.getAll();
+        request.onsuccess = () => {
+          const current = request.result.filter(row => row[dateKey] === date);
+          const protectedRows = current.filter(row => row.synced !== true || row.syncIssue || !row.verifiedAt);
+          const protectedKeys = new Set(protectedRows.map(row => row[studentKey]));
+          current.filter(row => row.synced === true && !row.syncIssue && row.verifiedAt).forEach(row => store.delete(row.id));
+          incoming.filter(row => !protectedKeys.has(row[studentKey])).forEach(row => store.put(row));
+        };
+      };
+      merge('school_entries', entries, 'entry_date', 'student_id');
+      merge('meal_logs', meals, 'date', 'studentRegistration');
+      tx.objectStore('offline_meta').put({ id: 'snapshot', date, preparedAt,
+        students: students.length, entries: entries.length, meals: meals.length });
     });
   }
 
