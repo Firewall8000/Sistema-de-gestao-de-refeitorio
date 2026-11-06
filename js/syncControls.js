@@ -50,10 +50,15 @@ class SyncControls {
     if (!button || !status) return;
     const revision = ++this.revision;
     const online = navigator.onLine && this.reachable !== false;
-    button.disabled = !online || this.busy || !!window.syncEngine?.syncing;
+    const uploading = !!window.syncEngine?.syncing;
+    button.disabled = !online || this.busy || uploading;
     button.textContent = this.busy ? 'Sincronizando e conferindo…'
+      : uploading ? 'Enviando registros automaticamente…'
       : online ? 'Sincronizar e Conferir' : 'Atualizar dados para uso offline';
-    button.setAttribute('aria-busy', String(this.busy));
+    button.setAttribute('aria-busy', String(this.busy || uploading));
+    // Show the reason immediately, even before reading the local database.
+    if (uploading) status.textContent = `${window.syncEngine.progress || 'Enviando registros…'} Aguarde o envio terminar para conferir.`;
+    else if (this.busy) status.textContent = this.message;
     try {
       const [records, snapshot] = await Promise.all([
         this.localRecords(), window.dbEngine.get('offline_meta', 'snapshot')
@@ -71,6 +76,8 @@ class SyncControls {
       }
       if (!online) summary += '\nSem acesso confirmado ao servidor. Conecte-se para enviar registros e baixar dados para uso offline; a conexão será testada novamente automaticamente.';
       if (this.busy || this.message) summary += `\n${this.message}`;
+      if (uploading) summary += `\n${window.syncEngine.progress || 'Enviando registros…'} Aguarde o envio terminar para conferir.`;
+      else if (window.syncEngine?.lastError) summary += `\n${window.syncEngine.lastError}`;
       if (snapshot) {
         summary += `\nDados offline de ${snapshot.date}: ${snapshot.students} cadastros, ${snapshot.entries} entradas e ${snapshot.meals} registros de almoço. Atualizados em ${new Date(snapshot.preparedAt).toLocaleString('pt-BR')}.`;
         if (snapshot.date !== window.mealValidatorService.getTodayDateString()) summary += '\nOs dados offline são de outro dia. Atualize antes do atendimento.';
@@ -164,12 +171,12 @@ class SyncControls {
   }
 
   async run() {
-    if (this.busy || window.syncEngine?.syncing) return;
+    if (this.busy || window.syncEngine?.syncing) { await this.refreshStatus(); return; }
     if (!navigator.onLine || this.reachable === false) { await this.refreshStatus(); return; }
     this.busy = true;
     this.message = 'Enviando registros pendentes…';
-    await this.refreshStatus();
     try {
+      await this.refreshStatus();
       if (!window.supabaseClient) throw new Error('Conexão com o Supabase não configurada.');
       await window.syncEngine.syncPendingOfflineRecords({ manual: true });
       this.message = 'Conferindo aluno, data e horário dos registros no Supabase…';

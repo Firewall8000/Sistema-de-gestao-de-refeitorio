@@ -148,3 +148,56 @@ test('connected Wi-Fi without server access switches to disabled offline control
   assert.equal(h.nodes['btn-sync-check'].textContent,'Sincronizar e Conferir');
   assert.equal(h.nodes['btn-sync-check'].disabled,false);
 });
+
+test('automatic upload immediately explains disabled button, reports progress, and releases it on failure', async () => {
+  const h=setup();
+  h.records.school_entries.push(entry());
+  let finish;
+  h.window.supabaseClient.from=()=>({upsert:()=>new Promise(resolve=>{finish=resolve;})});
+  const upload=h.window.syncEngine.syncPendingOfflineRecords();
+  assert.equal(h.nodes['btn-sync-check'].textContent,'Enviando registros automaticamente…');
+  assert.equal(h.nodes['btn-sync-check'].disabled,true);
+  while(!finish) await Promise.resolve();
+  await h.controls.refreshStatus();
+  assert.match(h.nodes['sync-device-status'].textContent,/Entradas enviadas: 0 de 1/);
+  finish({error:{message:'network'}});
+  await upload;
+  await h.controls.refreshStatus();
+  assert.equal(h.nodes['btn-sync-check'].textContent,'Sincronizar e Conferir');
+  assert.equal(h.nodes['btn-sync-check'].disabled,false);
+  assert.match(h.nodes['sync-device-status'].textContent,/não confirmou/);
+  assert.equal(h.records.school_entries[0].synced,false);
+});
+
+test('manual upload failure stops verification/preparation and releases busy state', async () => {
+  const h=setup();h.records.school_entries.push(entry());
+  h.window.supabaseClient.from=()=>({upsert:async()=>({error:{message:'denied'}})});
+  let verified=false;
+  h.controls.verify=async()=>{verified=true;};
+  await h.controls.run();
+  assert.equal(verified,false);
+  assert.equal(h.writes.length,0);
+  assert.equal(h.controls.busy,false);
+  assert.equal(h.window.syncEngine.syncing,false);
+  assert.equal(h.nodes['btn-sync-check'].disabled,false);
+  assert.match(h.nodes['sync-device-status'].textContent,/Não foi possível concluir/);
+});
+
+test('shared upload budget stops the batch and keeps remaining records for retry', async () => {
+  const h=setup();
+  h.records.school_entries.push(entry(),entry({id:'e2',student_id:'s2'}));
+  let uploads=0;
+  h.window.supabaseClient.from=()=>({upsert(){
+    const query={then(resolve,reject){
+      uploads++;
+      h.window.syncEngine.deadline=Date.now()-1;
+      return Promise.resolve({error:null}).then(resolve,reject);
+    }};return query;
+  }});
+  await h.window.syncEngine.syncPendingOfflineRecords();
+  assert.equal(uploads,1);
+  assert.equal(h.records.school_entries[0].synced,true);
+  assert.equal(h.records.school_entries[1].synced,false);
+  assert.equal(h.window.syncEngine.syncing,false);
+  assert.match(h.window.syncEngine.lastError,/tempo desta tentativa/);
+});

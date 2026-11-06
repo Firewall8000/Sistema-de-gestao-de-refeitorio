@@ -96,26 +96,35 @@ class NetworkSyncEngine {
     if (window.syncControls?.busy && !manual) return;
     if (!window.dbEngine || !window.supabaseClient || !navigator.onLine || this.syncing) return;
     this.syncing = true;
+    this.lastError = '';
+    this.deadline = Date.now() + (manual ? 60000 : 20000);
+    this.setProgress('Preparando envio dos registros…');
 
     try {
       // Portaria primeiro: preserva a data e o horário capturados sem internet.
       const entries = await window.dbEngine.getAll('school_entries');
-      for (const entry of entries.filter(e => e.synced !== true)) {
+      const pendingEntries = entries.filter(e => e.synced !== true);
+      let sentEntries = 0;
+      this.setProgress(`Entradas enviadas: 0 de ${pendingEntries.length}.`);
+      for (const entry of pendingEntries) {
         const row = { id: entry.id, student_id: entry.student_id, student_name: entry.student_name,
           turma: entry.turma, entry_date: entry.entry_date, entry_time: entry.entry_time, entry_method: entry.entry_method };
-        const { error } = await this.withTimeout(window.supabaseClient.from('school_entries').upsert(row, {
+        const { error } = await this.syncRequest(window.supabaseClient.from('school_entries').upsert(row, {
           onConflict: 'student_id,entry_date', ignoreDuplicates: true
         }));
-        if (!error) await window.dbEngine.put('school_entries', { ...entry, synced: true });
-        else console.warn('Entrada ainda pendente de sincronização:', error);
+        if (error) throw new Error('O servidor não confirmou o envio da entrada. Verifique a conexão e as permissões.');
+        await window.dbEngine.put('school_entries', { ...entry, synced: true });
+        this.setProgress(`Entradas enviadas: ${++sentEntries} de ${pendingEntries.length}.`);
       }
       const allMeals = await window.dbEngine.getAll('meal_logs');
       const pendingMeals = allMeals.filter(m => !m.synced);
+      let sentMeals = 0;
 
       if (pendingMeals.length > 0 && window.supabaseClient && navigator.onLine) {
         console.log(`🔄 Sincronizando ${pendingMeals.length} registros offline pendentes para Supabase...`);
 
         for (const meal of pendingMeals) {
+          this.setProgress(`Almoços enviados: ${sentMeals} de ${pendingMeals.length}.`);
           const row = {
             id: meal.id,
             student_id: meal.studentId,
@@ -130,25 +139,40 @@ class NetworkSyncEngine {
             validation_method: meal.validationMethod
           };
 
-          const { error } = await this.withTimeout(window.supabaseClient.from('meal_logs').upsert(row, {
+          const { error } = await this.syncRequest(window.supabaseClient.from('meal_logs').upsert(row, {
             onConflict: 'student_id,date',
             ignoreDuplicates: true
           }));
-          if (!error) {
-            meal.synced = true;
-            await window.dbEngine.put('meal_logs', meal);
-          }
+          if (error) throw new Error('O servidor não confirmou o envio do almoço. Verifique a conexão e as permissões.');
+          meal.synced = true;
+          await window.dbEngine.put('meal_logs', meal);
+          this.setProgress(`Almoços enviados: ${++sentMeals} de ${pendingMeals.length}.`);
         }
 
         const remaining = (await window.dbEngine.getAll('meal_logs')).filter(m => !m.synced).length;
         console.log(`Sincronização de almoços concluída: ${remaining} pendentes.`);
       }
     } catch (err) {
+      this.lastError = `${err.message} Os registros não enviados continuam neste aparelho.`;
       console.warn('⚠️ Falha durante a sincronização de registros offline:', err);
+      if (manual) throw err;
     } finally {
       this.syncing = false;
+      this.progress = '';
+      this.deadline = null;
       window.syncControls?.refreshStatus();
     }
+  }
+
+  setProgress(message) {
+    this.progress = message;
+    window.syncControls?.refreshStatus();
+  }
+
+  syncRequest(query) {
+    const remaining = this.deadline - Date.now();
+    if (remaining <= 0) throw new Error('O envio atingiu o tempo desta tentativa. Tente novamente para continuar.');
+    return this.withTimeout(query, Math.min(8000, remaining));
   }
 
   async withTimeout(query, ms = 8000) {

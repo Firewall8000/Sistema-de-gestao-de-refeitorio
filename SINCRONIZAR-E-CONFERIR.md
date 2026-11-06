@@ -5,6 +5,7 @@ Disponível no leitor, nos modos Portaria e Refeitório. Não é o painel remoto
 - Com conexão detectada: **Sincronizar e Conferir** envia os registros pendentes, consulta o Supabase para comparar aluno/data/horário e situação do almoço, e baixa cadastros e registros de hoje para uso offline.
 - Sem conexão detectada: **Atualizar dados para uso offline** aparece desabilitado. Baixar dados exige conexão; a explicação aparece abaixo do botão. O sistema testa novamente o acesso ao servidor a cada 15 segundos, quando não está sincronizando.
 - A borda e o brilho âmbar destacam registros pendentes, ainda não conferidos ou com divergências. A quantidade também aparece em texto. O destaque não depende da cor para comunicar o problema.
+- Durante o envio automático, o botão informa **Enviando registros automaticamente…**, com progresso de entradas/almoços. O envio usa um orçamento de rede de 20 segundos na tentativa automática e 60 segundos na manual (até 8 segundos por requisição); o restante fica salvo para outra tentativa. Esses limites não incluem a etapa posterior de conferência e preparação offline. Falhas de envio aparecem na página e interrompem a operação manual antes de anunciar conferência.
 - Uma gravação aceita pelo servidor não é suficiente para anunciar conferência: o botão consulta o registro por aluno e data e compara o horário. Divergências ficam listadas, sem sobrescrever horários.
 - A conferência cobre os registros existentes neste navegador. Não identifica alunos nunca lidos, dados apagados nem pendências de outros aparelhos. Datas antigas podem não estar visíveis pelas políticas do Supabase; nesses casos o resultado é “não localizado ou sem permissão”, nunca “tudo conferido”.
 - O recebimento dos dados offline é feito em uma transação local: erro na gravação mantém o conjunto anterior. Registros pendentes, divergências e registros de dias anteriores são preservados. O cache de cadastros é substituído pelos cadastros visíveis no servidor.
@@ -12,7 +13,7 @@ Disponível no leitor, nos modos Portaria e Refeitório. Não é o painel remoto
 
 ## Publicação
 
-Enviar os arquivos alterados ao GitHub e aguardar a Vercel. Esta alteração não exige novo SQL. Reabrir o site conectado no mesmo navegador; não apagar os dados. Se a atualização local solicitar fechar outras abas, fechá-las e reabrir. Cache do aplicativo: v3.6.0; banco local: versão 3, com preservação dos registros anteriores.
+Enviar os arquivos alterados ao GitHub e aguardar a Vercel. Esta alteração não exige novo SQL. Reabrir o site conectado no mesmo navegador; não apagar os dados. Se a atualização local solicitar fechar outras abas, fechá-las e reabrir. Cache do aplicativo: v3.6.1; banco local: versão 3, com preservação dos registros anteriores.
 
 O envio de almoços usa o conflito `(student_id, date)`, correspondente à restrição de `sql/schema.sql` e da RPC atual. Não usa mais `(date, student_registration)`, que não está definido nesse esquema.
 
