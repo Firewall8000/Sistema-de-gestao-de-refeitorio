@@ -34,11 +34,12 @@ class SyncControls {
   }
 
   async localRecords() {
+    const today = window.mealValidatorService.getTodayDateString();
     const [entries, meals] = await Promise.all([
       window.dbEngine.getAll('school_entries'), window.dbEngine.getAll('meal_logs')
     ]);
-    return [...entries.map(row => ({ table: 'school_entries', row })),
-      ...meals.map(row => ({ table: 'meal_logs', row }))];
+    return [...entries.filter(row => row.entry_date === today).map(row => ({ table: 'school_entries', row })),
+      ...meals.filter(row => row.date === today).map(row => ({ table: 'meal_logs', row }))];
   }
 
   dateOf(item) { return item.table === 'school_entries' ? item.row.entry_date : item.row.date; }
@@ -60,19 +61,23 @@ class SyncControls {
     if (uploading) status.textContent = `${window.syncEngine.progress || 'Enviando registros…'} Aguarde o envio terminar para conferir.`;
     else if (this.busy) status.textContent = this.message;
     try {
-      const [records, snapshot] = await Promise.all([
-        this.localRecords(), window.dbEngine.get('offline_meta', 'snapshot')
+      const [records, snapshot, cleanup] = await Promise.all([
+        this.localRecords(), window.dbEngine.get('offline_meta', 'snapshot'),
+        window.dbEngine.get('offline_meta', 'pending_cleanup')
       ]);
       if (revision !== this.revision) return;
       const pending = records.filter(item => item.row.synced !== true).length;
       const issues = records.filter(item => item.row.syncIssue);
       const unchecked = records.filter(item => item.row.synced === true && !item.row.verifiedAt && !item.row.syncIssue).length;
       button.classList.toggle('sync-attention', pending > 0 || issues.length > 0 || unchecked > 0);
-      let summary = `${pending} pendente(s) de envio • ${unchecked} aguardando conferência • ${issues.length} com divergência ou sem confirmação.`;
-      if (records.length === 0) summary = 'Nenhum registro salvo neste aparelho para conferir.';
+      let summary = `Hoje: ${pending} pendente(s) de envio • ${unchecked} aguardando conferência • ${issues.length} com divergência ou sem confirmação.`;
+      if (records.length === 0) summary = 'Nenhum registro de hoje salvo neste aparelho para conferir.';
       else if (!pending && !issues.length && !unchecked) {
         const oldest = Math.min(...records.map(item => Date.parse(item.row.verifiedAt)));
-        summary = `${records.length} registro(s) conferido(s) no Supabase. Conferência mais antiga: ${new Date(oldest).toLocaleString('pt-BR')}.`;
+        summary = `${records.length} registro(s) de hoje conferido(s) no Supabase. Conferência mais antiga: ${new Date(oldest).toLocaleString('pt-BR')}.`;
+      }
+      if (cleanup?.date === window.mealValidatorService.getTodayDateString()) {
+        summary += `\nLimpeza de hoje: ${cleanup.entries} entrada(s) e ${cleanup.meals} almoço(s) pendentes de dias anteriores excluídos deste aparelho, sem envio ao servidor.`;
       }
       if (!online) summary += '\nSem acesso confirmado ao servidor. Conecte-se para enviar registros e baixar dados para uso offline; a conexão será testada novamente automaticamente.';
       if (this.busy || this.message) summary += `\n${this.message}`;
@@ -134,17 +139,21 @@ class SyncControls {
   }
 
   async verify(records) {
+    const today = window.mealValidatorService.getTodayDateString();
     const groups = new Map();
     for (const item of records) {
+      if (this.dateOf(item) !== today) continue;
       const key = `${item.table}|${this.dateOf(item)}`;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(item);
     }
     let issues = 0;
     for (const group of groups.values()) {
+      window.syncEngine.assertSameDay(today);
       const remote = await this.fetchAll(group[0].table, this.dateOf(group[0]));
       const byStudent = new Map(remote.map(row => [row.student_id, row]));
       for (const item of group) {
+        window.syncEngine.assertSameDay(today);
         const current = await window.dbEngine.get(item.table, item.row.id);
         if (!current || JSON.stringify(current) !== JSON.stringify(item.row)) continue;
         const issue = this.difference(item, byStudent.get(this.studentOf(item)));

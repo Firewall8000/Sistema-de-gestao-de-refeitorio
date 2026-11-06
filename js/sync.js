@@ -13,6 +13,9 @@ class NetworkSyncEngine {
     // Listen for online / offline network status changes
     window.addEventListener('online', () => this.handleNetworkChange(true));
     window.addEventListener('offline', () => this.handleNetworkChange(false));
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) this.syncPendingOfflineRecords();
+    });
 
     // Register Service Worker
     this.registerServiceWorker();
@@ -23,7 +26,7 @@ class NetworkSyncEngine {
     // Initial check
     this.handleNetworkChange(navigator.onLine);
     this.retryTimer = setInterval(() => {
-      if (navigator.onLine) this.syncPendingOfflineRecords();
+      this.syncPendingOfflineRecords();
     }, 30000);
   }
 
@@ -86,7 +89,7 @@ class NetworkSyncEngine {
         offlineBar.classList.remove('hidden');
       }
     }
-    if (online) this.syncPendingOfflineRecords();
+    this.syncPendingOfflineRecords();
   }
 
   /**
@@ -94,19 +97,23 @@ class NetworkSyncEngine {
    */
   async syncPendingOfflineRecords({ manual = false } = {}) {
     if (window.syncControls?.busy && !manual) return;
-    if (!window.dbEngine || !window.supabaseClient || !navigator.onLine || this.syncing) return;
+    if (!window.dbEngine || this.syncing) return;
     this.syncing = true;
     this.lastError = '';
-    this.deadline = Date.now() + (manual ? 60000 : 20000);
-    this.setProgress('Preparando envio dos registros…');
+    const today = window.mealValidatorService.getTodayDateString();
+    this.setProgress('Conferindo a data das pendências locais…');
 
     try {
+      await window.dbEngine.discardExpiredPending(today);
+      if (!window.supabaseClient || !navigator.onLine) return;
+      this.deadline = Date.now() + (manual ? 60000 : 20000);
       // Portaria primeiro: preserva a data e o horário capturados sem internet.
       const entries = await window.dbEngine.getAll('school_entries');
-      const pendingEntries = entries.filter(e => e.synced !== true);
+      const pendingEntries = entries.filter(e => e.synced !== true && e.entry_date === today);
       let sentEntries = 0;
       this.setProgress(`Entradas enviadas: 0 de ${pendingEntries.length}.`);
       for (const entry of pendingEntries) {
+        this.assertSameDay(today);
         const row = { id: entry.id, student_id: entry.student_id, student_name: entry.student_name,
           turma: entry.turma, entry_date: entry.entry_date, entry_time: entry.entry_time, entry_method: entry.entry_method };
         const { error } = await this.syncRequest(window.supabaseClient.from('school_entries').upsert(row, {
@@ -117,13 +124,14 @@ class NetworkSyncEngine {
         this.setProgress(`Entradas enviadas: ${++sentEntries} de ${pendingEntries.length}.`);
       }
       const allMeals = await window.dbEngine.getAll('meal_logs');
-      const pendingMeals = allMeals.filter(m => !m.synced);
+      const pendingMeals = allMeals.filter(m => m.synced !== true && m.date === today);
       let sentMeals = 0;
 
       if (pendingMeals.length > 0 && window.supabaseClient && navigator.onLine) {
         console.log(`🔄 Sincronizando ${pendingMeals.length} registros offline pendentes para Supabase...`);
 
         for (const meal of pendingMeals) {
+          this.assertSameDay(today);
           this.setProgress(`Almoços enviados: ${sentMeals} de ${pendingMeals.length}.`);
           const row = {
             id: meal.id,
@@ -149,7 +157,7 @@ class NetworkSyncEngine {
           this.setProgress(`Almoços enviados: ${++sentMeals} de ${pendingMeals.length}.`);
         }
 
-        const remaining = (await window.dbEngine.getAll('meal_logs')).filter(m => !m.synced).length;
+        const remaining = (await window.dbEngine.getAll('meal_logs')).filter(m => m.synced !== true && m.date === today).length;
         console.log(`Sincronização de almoços concluída: ${remaining} pendentes.`);
       }
     } catch (err) {
@@ -167,6 +175,12 @@ class NetworkSyncEngine {
   setProgress(message) {
     this.progress = message;
     window.syncControls?.refreshStatus();
+  }
+
+  assertSameDay(today) {
+    if (window.mealValidatorService.getTodayDateString() !== today) {
+      throw new Error('O dia mudou. A próxima tentativa fará a limpeza e enviará somente registros do novo dia.');
+    }
   }
 
   syncRequest(query) {

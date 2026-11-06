@@ -12,6 +12,7 @@ function setup(online = false) {
     studentService: { getByQrToken: async () => student, getAllStudents: async () => [student], getDisplayName: (e, s) => s?.name || e.student_name },
     showAlertModal: async a => { alerts.push(a); },
     dbEngine: {
+      discardExpiredPending: async () => {},
       getAll: async table => records[table],
       getAllByIndex: async table => records[table],
       put: async (table, row) => {
@@ -82,11 +83,11 @@ test('internet indicator does not mark failed cloud writes as synchronized', asy
 
 test('failed sync keeps pending data and retries without parallel upload', async () => {
   const h = setup(true);
-  h.records.school_entries.push({ id: 'entry', student_id: 's2', entry_date: '2026-10-23', synced: false });
+  h.records.school_entries.push({ id: 'entry', student_id: 's2', entry_date: h.m.getTodayDateString(), synced: false });
   let finish;
   h.window.supabaseClient.from = () => ({ upsert: () => new Promise(resolve => { finish = resolve; }) });
   const first = h.window.syncEngine.syncPendingOfflineRecords();
-  await Promise.resolve();
+  while (!finish) await Promise.resolve();
   await h.window.syncEngine.syncPendingOfflineRecords();
   finish({ error: { message: 'unavailable' } });
   await first;

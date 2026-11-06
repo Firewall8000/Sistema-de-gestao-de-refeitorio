@@ -14,6 +14,7 @@ function setup() {
   const nodes = Object.fromEntries(['btn-sync-check', 'sync-device-status', 'sync-device-issues', 'sync-device-issue-list'].map(id => [id, node()]));
   const window = {
     dbEngine: {
+      discardExpiredPending: async () => {},
       getAll: async t => records[t].map(row => ({ ...row })),
       get: async (t, id) => records[t].find(row => row.id === id),
       put: async (t, row) => { const i = records[t].findIndex(r => r.id === row.id); if (i < 0) records[t].push(row); else records[t][i] = row; },
@@ -42,6 +43,39 @@ function setup() {
   return { window, context, controls:window.syncControls, records, cloud, nodes, writes, calls };
 }
 const entry = (extra = {}) => ({ id:'e1',student_id:'s1',student_name:'Aluno',entry_date:'2026-11-05',entry_time:'2026-11-05T10:00:00Z',synced:false,...extra });
+
+test('daily status and verification exclude previous days', async () => {
+  const h=setup();
+  h.records.school_entries.push(entry({entry_date:'2026-11-04',synced:true}));
+  h.records.meal_logs.push({id:'old',date:'2026-11-04',synced:false});
+  assert.equal((await h.controls.localRecords()).length,0);
+  await h.controls.verify(await h.controls.localRecords());
+  assert.equal(h.calls.length,0);
+  await h.controls.refreshStatus();
+  assert.match(h.nodes['sync-device-status'].textContent,/Nenhum registro de hoje/);
+  assert.equal(h.nodes['btn-sync-check'].classList.classes.has('sync-attention'),false);
+});
+
+test('midnight stops further sends without changing the original date', async () => {
+  const h=setup(); let day='2026-11-05'; const sent=[];
+  h.window.mealValidatorService.getTodayDateString=()=>day;
+  h.records.school_entries.push(entry(),entry({id:'e2',student_id:'s2'}));
+  h.window.supabaseClient={from:()=>({upsert:async row=>{
+    sent.push(row);day='2026-11-06';return {error:null};
+  }})};
+  await h.window.syncEngine.syncPendingOfflineRecords();
+  assert.equal(sent.length,1);
+  assert.equal(sent[0].entry_date,'2026-11-05');
+  assert.equal(h.records.school_entries[1].synced,false);
+  assert.match(h.window.syncEngine.lastError,/O dia mudou/);
+});
+
+test('school date stays on the previous day before midnight in Fortaleza', () => {
+  const window={};
+  class FixedDate extends Date { constructor(...args) { super(...(args.length?args:['2026-11-07T01:00:00Z'])); } }
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../js/mealService.js'),'utf8'),{window,Date:FixedDate});
+  assert.equal(window.mealValidatorService.getTodayDateString(),'2026-11-06');
+});
 
 test('one button changes offline label, disables downloads, and glows for pending records', async () => {
   const h = setup(); h.records.school_entries.push(entry());

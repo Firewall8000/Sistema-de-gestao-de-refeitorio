@@ -185,6 +185,45 @@ class RefectoryDatabase {
     });
   }
 
+  // Delete only unsent readings dated before the school day, atomically.
+  // Confirmed history, students, malformed dates and future dates are preserved.
+  async discardExpiredPending(today) {
+    const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+      && Number.isFinite(Date.parse(value + 'T00:00:00Z'))
+      && new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) === value;
+    if (!validDate(today)) throw new Error('Data inválida para limpeza das pendências.');
+    return new Promise((resolve, reject) => {
+      const tx = this.db.transaction(['school_entries', 'meal_logs', 'offline_meta'], 'readwrite');
+      const removed = { entries: 0, meals: 0 };
+      tx.oncomplete = () => resolve(removed);
+      tx.onabort = () => reject(tx.error || new Error('Não foi possível limpar pendências antigas.'));
+      let finished = 0;
+      for (const [table, dateKey, countKey] of [
+        ['school_entries', 'entry_date', 'entries'], ['meal_logs', 'date', 'meals']
+      ]) {
+        const request = tx.objectStore(table).openCursor();
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (cursor) {
+            const row = cursor.value;
+            if (row.synced !== true && validDate(row[dateKey]) && row[dateKey] < today) {
+              cursor.delete(); removed[countKey]++;
+            }
+            cursor.continue();
+          } else if (++finished === 2 && (removed.entries || removed.meals)) {
+            const meta = tx.objectStore('offline_meta');
+            const previous = meta.get('pending_cleanup');
+            previous.onsuccess = () => {
+              const old = previous.result?.date === today ? previous.result : {};
+              meta.put({ id: 'pending_cleanup', date: today, at: new Date().toISOString(),
+                entries: (old.entries || 0) + removed.entries, meals: (old.meals || 0) + removed.meals });
+            };
+          }
+        };
+      }
+    });
+  }
+
   /**
    * Seeds initial seed data (mock students and users) if database is empty.
    */

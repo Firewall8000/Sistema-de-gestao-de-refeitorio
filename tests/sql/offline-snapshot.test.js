@@ -6,6 +6,44 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const path = require('node:path');
 
+test('offline cleanup removes only expired pending rows, then uploads today with original time', async t => {
+  const window={};
+  const context={window,indexedDB:new IDBFactory(),console,setTimeout,clearTimeout,
+    navigator:{onLine:false}};
+  vm.createContext(context);
+  for(const file of ['db.js','mealService.js','sync.js']) {
+    vm.runInContext(fs.readFileSync(path.join(__dirname,'../../js',file),'utf8'),context);
+  }
+  const db=window.dbEngine; await db.init(); t.after(()=>db.db.close());
+  window.mealValidatorService.getTodayDateString=()=> '2026-11-06';
+  await db.put('students',{id:'student',registration:'R1',qrToken:'QR1'});
+  for(const [table,dateKey] of [['school_entries','entry_date'],['meal_logs','date']]) {
+    for(const [id,date,synced] of [['old','2026-11-05',false],['today','2026-11-06',false],
+      ['history','2026-11-05',true],['future','2026-11-07',false],['invalid','2026-02-30',false]]) {
+      await db.put(table,{id,[dateKey]:date,synced,student_id:id,studentId:id,
+        entry_time:'2026-11-06T10:03:22Z',timestamp:'2026-11-06T10:03:22Z'});
+    }
+  }
+  await window.syncEngine.syncPendingOfflineRecords();
+  for(const table of ['school_entries','meal_logs']) {
+    assert.deepEqual((await db.getAll(table)).map(r=>r.id).sort(),['future','history','invalid','today']);
+  }
+  assert.ok(await db.get('students','student'));
+  const meta=await db.get('offline_meta','pending_cleanup');
+  assert.equal(meta.entries,1); assert.equal(meta.meals,1);
+  await window.syncEngine.syncPendingOfflineRecords();
+  assert.equal((await db.get('offline_meta','pending_cleanup')).entries,1);
+  const uploads=[];
+  window.supabaseClient={from:table=>({upsert:async row=>{uploads.push({table,row});return {error:null};}})};
+  context.navigator.onLine=true;
+  await window.syncEngine.syncPendingOfflineRecords();
+  assert.equal(uploads.length,2);
+  for(const {row} of uploads) {
+    assert.equal(row.entry_date||row.date,'2026-11-06');
+    assert.equal(row.entry_time||row.timestamp,'2026-11-06T10:03:22Z');
+  }
+});
+
 test('offline preparation commits atomically and preserves pending records and historical dates', async t => {
   const window={};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../js/db.js'),'utf8'),{window,indexedDB:new IDBFactory(),console});

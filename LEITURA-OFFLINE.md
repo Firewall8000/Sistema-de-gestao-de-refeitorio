@@ -8,8 +8,12 @@ exigindo confirmação própria no Admin.
 
 As entradas e os almoços são guardados no IndexedDB do aparelho. O envio pendente
 ocorre ao abrir o sistema online, ao recuperar a conexão e a cada 30 segundos
-com a página aberta. O horário e a data originais são enviados, inclusive para
-registros de dias anteriores. Falhas mantêm os registros pendentes. Reenvios
+com a página aberta. Somente registros do dia atual da escola (America/Fortaleza)
+são enviados, preservando a data e o horário originais. Pendências locais de dias
+anteriores são excluídas ao abrir ou retomar a página e nas tentativas periódicas,
+mesmo sem internet. Isso não apaga dados do Supabase nem histórico local já enviado.
+Com o navegador fechado, a limpeza aguarda a próxima abertura. Falhas mantêm as
+pendências de hoje para nova tentativa; elas expiram ao mudar o dia. Reenvios
 usam as restrições únicas do banco e não sobrescrevem registros existentes.
 
 ## Condições de uso

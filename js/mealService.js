@@ -252,14 +252,14 @@ class MealValidatorService {
   }
 
   /**
-   * Returns current local ISO date string (YYYY-MM-DD).
+   * Returns the school's date in Fortaleza, regardless of the device timezone.
    */
   getTodayDateString() {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Fortaleza', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).formatToParts(new Date());
+    const part = type => parts.find(p => p.type === type).value;
+    return `${part('year')}-${part('month')}-${part('day')}`;
   }
 
   /**

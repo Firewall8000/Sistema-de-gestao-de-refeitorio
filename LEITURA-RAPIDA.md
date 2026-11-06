@@ -7,7 +7,7 @@ O fluxo anterior esperava consultas sequenciais à nuvem, gravação remota, pos
 - Com a migração `sql/migrations/06_register_scan.sql` aplicada, o leitor faz uma única chamada `register_scan_rpc` ao Supabase para identificar o aluno, verificar atividade/entrada/duplicidade, gravar e devolver posição e resultado. O registro principal ocorre antes da confirmação; os painéis são atualizados depois. Negativas e erros de permissão não acionam aprovação local.
 - Orçamento total de 1,8 segundo para as requisições remotas iniciadas durante uma validação. Não é uma promessa de tempo total de câmera, armazenamento e renderização.
 - Ao esgotar esse prazo, cancelamento da requisição quando suportado e uso do banco local. Por 15 segundos, novas leituras usam a alternativa local para evitar repetir a espera em cada aluno.
-- Confirmação somente após a gravação local; registros sem confirmação remota continuam pendentes para o sincronizador existente, que tenta novamente a cada 30 segundos ou ao reconectar.
+- Confirmação somente após a gravação local; registros sem confirmação remota continuam pendentes para o sincronizador, que tenta novamente a cada 30 segundos ou ao reconectar, enquanto forem do dia atual da escola. Pendências de dias anteriores são excluídas localmente, conforme `LEITURA-OFFLINE.md`.
 - Contadores e fila atualizados em segundo plano, sem prender a próxima leitura. A validação do almoço deixa de baixar e regravar todos os cadastros.
 - Decodificador pausado durante a validação. Leitor alternativo processa imagens com lado máximo de 640 pixels e evita decodificar enquanto há registro em andamento.
 - Mensagem imediata de QR identificado, separada da confirmação de entrada/almoço. A alternativa local informa que a fila pode estar incompleta.
